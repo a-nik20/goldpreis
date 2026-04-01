@@ -698,7 +698,7 @@ export default function Home() {
               ...(activeTab === "disclaimer" ? activeTabStyle : {}),
             }}
           >
-            Disclaimer
+            Disclaimer & Datenschutz
           </button>
         </div>
 
@@ -836,7 +836,9 @@ export default function Home() {
 
         {activeTab === "market" && (
           <>
-            <p style={infoStyle}>Marktnahe Richtwerte. Aktualisierung alle 60 Sekunden.</p>
+            <p style={infoStyle}>
+              Marktnahe Richtwerte. Aktualisierung alle 60 Sekunden.
+            </p>
 
             <div style={noticeBoxStyle}>
               <strong>Hinweis:</strong> Alle Angaben auf dieser Website dienen
@@ -983,10 +985,8 @@ export default function Home() {
                 Österreich
               </p>
 
-              <p>
-                E-Mail: a_nikbay@outlook.com
-              </p>
-<br />
+              <p>E-Mail: a_nikbay@outlook.com</p>
+              <br />
               <p>
                 <strong>Haftungsausschluss:</strong>
                 <br />
@@ -1002,7 +1002,7 @@ export default function Home() {
                 bereitgestellten Informationen entstehen, ist - soweit gesetzlich
                 zulässig - ausgeschlossen.
               </p>
-<br />
+              <br />
               <p>
                 <strong>Keine Anlageberatung:</strong>
                 <br />
@@ -1011,7 +1011,7 @@ export default function Home() {
                 bereitgestellten Informationen ersetzen keine individuelle
                 Beratung.
               </p>
-<br />
+              <br />
               <p>
                 <strong>Zeitstempel-Hinweis:</strong>
                 <br />
@@ -1020,7 +1020,7 @@ export default function Home() {
                 sind aufgrund von Zeitverzögerungen, Aufschlägen, Spreads und
                 Rundungen möglich.
               </p>
-<br />
+              <br />
               <p>
                 <strong>Zu den Preisangaben:</strong>
                 <br />
@@ -1036,23 +1036,23 @@ export default function Home() {
                 einzelner Websites direkt. Die angezeigten Werte werden aus
                 externen Marktdaten sowie eigenen Berechnungen abgeleitet.
               </p>
-<br />
+              <br />
               <p>
                 <strong>Keine Verbindlichkeit:</strong>
                 <br />
                 Es kommt kein Vertragsverhältnis allein durch die Nutzung dieser
                 Website zustande.
               </p>
-<br />
+              <br />
               <p>
                 <strong>Hinweis zum Datenschutz und zur Kontaktaufnahme:</strong>
                 <br />
                 Die im Impressum veröffentlichten Kontaktdaten dienen
-                ausschließlich der gesetzlich vorgeschriebenen Anbieterkennzeichnung
-                und der zulässigen Kontaktaufnahme. Einer missbräuchlichen
-                Verwendung, insbesondere zur Übersendung von Werbung, Spam,
-                Massenanfragen oder zur sonstigen unbefugten Weiterverarbeitung,
-                wird ausdrücklich widersprochen.
+                ausschließlich der gesetzlich vorgeschriebenen
+                Anbieterkennzeichnung und der zulässigen Kontaktaufnahme. Einer
+                missbräuchlichen Verwendung, insbesondere zur Übersendung von
+                Werbung, Spam, Massenanfragen oder zur sonstigen unbefugten
+                Weiterverarbeitung, wird ausdrücklich widersprochen.
               </p>
             </div>
           </section>
@@ -1060,7 +1060,7 @@ export default function Home() {
 
         {activeTab === "disclaimer" && (
           <section style={cardStyle}>
-            <h2 style={sectionTitleStyle}>Disclaimer</h2>
+            <h2 style={sectionTitleStyle}>Disclaimer & Datenschutz</h2>
 
             <div style={legalTextStyle}>
               <p>
@@ -1080,7 +1080,8 @@ export default function Home() {
               <p>
                 Sämtliche Preisangaben sind unverbindliche Richtwerte.
                 Abweichungen zu tatsächlichen Händler-, Ankauf-, Verkauf- oder
-                Produktpreisen sind jederzeit möglich. Technische Goldpreisdaten werden über gold-api.com bezogen.
+                Produktpreisen sind jederzeit möglich. Technische
+                Goldpreisdaten werden über gold-api.com bezogen.
               </p>
 
               <p>
@@ -1102,13 +1103,92 @@ export default function Home() {
                 Wechselkursdaten sowie eigenen Berechnungsmodellen und
                 Annäherungen.
               </p>
+
+              <br />
+
+              <p>
+                <strong>Datenschutzhinweis:</strong>
+                <br />
+                Diese Website verarbeitet personenbezogene Daten nur in jenem
+                Umfang, der für den technischen Betrieb, die Bereitstellung der
+                Website sowie zur Reichweitenmessung und Verbesserung des
+                Angebots erforderlich ist.
+              </p>
+
+              <p>
+                <strong>Hosting:</strong>
+                <br />
+                Diese Website wird über Vercel bereitgestellt. Dabei können
+                technische Zugriffsdaten wie IP-Adresse, Zeitpunkt des Aufrufs,
+                Browser-Informationen, Gerätedaten und aufgerufene Seiten
+                verarbeitet werden, soweit dies zur sicheren und stabilen
+                Bereitstellung der Website erforderlich ist.
+              </p>
+
+              <p>
+                <strong>Analytics:</strong>
+                <br />
+                Diese Website verwendet Vercel Analytics zur anonymisierten bzw.
+                aggregierten Auswertung der Nutzung. Erfasst werden insbesondere
+                Seitenaufrufe, Referrer, ungefähre Geolokation, Gerätetyp,
+                Betriebssystem, Browser sowie Zeitstempel. Die Daten dienen
+                ausschließlich statistischen Zwecken und der Verbesserung des
+                Angebots.
+              </p>
+
+              <p>
+                <strong>Cookies und Tracking:</strong>
+                <br />
+                Nach aktuellem technischem Stand verwendet die eingesetzte
+                Analytics-Lösung keine Third-Party-Cookies. Es kann dennoch nicht
+                ausgeschlossen werden, dass technische Verbindungs- und
+                Nutzungsdaten durch den Hosting- oder Analytics-Anbieter im
+                erforderlichen Umfang verarbeitet werden.
+              </p>
+
+              <p>
+                <strong>Rechtsgrundlage:</strong>
+                <br />
+                Die Verarbeitung erfolgt auf Grundlage unseres berechtigten
+                Interesses an der sicheren Bereitstellung der Website, an der
+                technischen Fehlerbehebung sowie an der anonymisierten
+                statistischen Auswertung und Verbesserung unseres Online-Angebots.
+              </p>
+
+              <p>
+                <strong>Speicherdauer:</strong>
+                <br />
+                Personenbezogene Daten werden nur so lange gespeichert, wie dies
+                für die genannten Zwecke erforderlich ist oder gesetzliche
+                Aufbewahrungspflichten bestehen.
+              </p>
+
+              <p>
+                <strong>Ihre Rechte:</strong>
+                <br />
+                Sie haben im Rahmen der gesetzlichen Bestimmungen das Recht auf
+                Auskunft, Berichtigung, Löschung, Einschränkung der Verarbeitung,
+                Widerspruch sowie gegebenenfalls Datenübertragbarkeit. Wenn Sie
+                der Ansicht sind, dass die Verarbeitung Ihrer Daten gegen
+                Datenschutzrecht verstößt, können Sie sich an die zuständige
+                Datenschutzbehörde wenden.
+              </p>
+
+              <p>
+                <strong>Kontakt:</strong>
+                <br />
+                Für Anfragen zum Datenschutz oder zu den auf dieser Website
+                verarbeiteten Daten können Sie sich an die im Impressum genannte
+                E-Mail-Adresse wenden.
+              </p>
             </div>
           </section>
         )}
 
-<p style={footerSourceStyle}>
-  Datenquellen: Externe Goldpreis-API, Wechselkursdaten und eigene Berechnungen.
-</p>
+        <p style={footerSourceStyle}>
+          Datenquellen: Externe Goldpreis-API, Wechselkursdaten und eigene
+          Berechnungen.
+        </p>
 
         <p style={updatedStyle}>Letztes Update: {updated}</p>
       </div>
@@ -1236,4 +1316,3 @@ const legalTextStyle: React.CSSProperties = {
   lineHeight: 1.7,
   fontSize: "15px",
 };
-
