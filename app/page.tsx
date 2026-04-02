@@ -251,9 +251,10 @@ const MARKET_PREMIUMS = {
 };
 
 export default function Home() {
-  const [activeTab, setActiveTab] = useState<
-    "ref" | "market" | "impressum" | "disclaimer"
-  >("ref");
+  const [activeTab, setActiveTab] = useState<"ref" | "market">("ref");
+  const [legalTab, setLegalTab] = useState<"none" | "impressum" | "disclaimer">(
+    "none"
+  );
 
   const [refGeneral, setRefGeneral] = useState<RefGeneralRow[]>([]);
   const [refAustria, setRefAustria] = useState<RefAustriaRow[]>([]);
@@ -265,6 +266,7 @@ export default function Home() {
 
   const [updated, setUpdated] = useState("");
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
 
   const previousRef = useRef<RawSnapshot>({
     refGeneral: {},
@@ -280,6 +282,7 @@ export default function Home() {
   async function loadData() {
     try {
       setLoading(true);
+      setError("");
 
       const goldRes = await fetch("https://api.gold-api.com/price/XAU", {
         cache: "no-store",
@@ -644,6 +647,9 @@ export default function Home() {
       setUpdated(new Date().toLocaleTimeString("de-AT"));
     } catch (error) {
       console.error("Fehler beim Laden:", error);
+      setError(
+        "Preise konnten derzeit nicht geladen werden. Bitte versuche es in Kürze erneut."
+      );
     } finally {
       setLoading(false);
     }
@@ -662,7 +668,10 @@ export default function Home() {
 
         <div style={tabContainer}>
           <button
-            onClick={() => setActiveTab("ref")}
+            onClick={() => {
+              setActiveTab("ref");
+              setLegalTab("none");
+            }}
             style={{
               ...tabButton,
               ...(activeTab === "ref" ? activeTabStyle : {}),
@@ -672,7 +681,10 @@ export default function Home() {
           </button>
 
           <button
-            onClick={() => setActiveTab("market")}
+            onClick={() => {
+              setActiveTab("market");
+              setLegalTab("none");
+            }}
             style={{
               ...tabButton,
               ...(activeTab === "market" ? activeTabStyle : {}),
@@ -680,27 +692,9 @@ export default function Home() {
           >
             Marktpreise
           </button>
-
-          <button
-            onClick={() => setActiveTab("impressum")}
-            style={{
-              ...tabButton,
-              ...(activeTab === "impressum" ? activeTabStyle : {}),
-            }}
-          >
-            Impressum
-          </button>
-
-          <button
-            onClick={() => setActiveTab("disclaimer")}
-            style={{
-              ...tabButton,
-              ...(activeTab === "disclaimer" ? activeTabStyle : {}),
-            }}
-          >
-            Disclaimer & Datenschutz
-          </button>
         </div>
+
+        {error && <div style={errorBoxStyle}>⚠️ {error}</div>}
 
         {activeTab === "ref" && (
           <>
@@ -723,7 +717,9 @@ export default function Home() {
               direkt übernommen.
             </div>
 
-            {loading && <p style={loadingStyle}>Preise werden geladen...</p>}
+            {loading && (
+              <div style={loadingBoxStyle}>🔄 Aktuelle Preise werden geladen …</div>
+            )}
 
             <section style={cardStyle}>
               <h2 style={sectionTitleStyle}>Goldpreis allgemein</h2>
@@ -831,6 +827,17 @@ export default function Home() {
                 </tbody>
               </table>
             </section>
+
+            <section style={seoCardStyle}>
+              <h2 style={seoTitleStyle}>Über diese Referenzpreise</h2>
+              <p style={seoTextStyle}>
+                Diese Seite zeigt aktuelle Goldpreise für Österreich und
+                türkisches Gold in Euro und Lira auf Basis internationaler
+                Spotpreise, Wechselkurse und eigener Berechnungen. Die
+                Referenzpreise dienen der Orientierung und stellen keine
+                verbindlichen Händlerpreise dar.
+              </p>
+            </section>
           </>
         )}
 
@@ -855,7 +862,9 @@ export default function Home() {
               Händlerpreisen sind daher jederzeit möglich.
             </div>
 
-            {loading && <p style={loadingStyle}>Preise werden geladen...</p>}
+            {loading && (
+              <div style={loadingBoxStyle}>🔄 Aktuelle Preise werden geladen …</div>
+            )}
 
             <section style={cardStyle}>
               <h2 style={sectionTitleStyle}>Marktpreis allgemein</h2>
@@ -963,10 +972,59 @@ export default function Home() {
                 </tbody>
               </table>
             </section>
+
+            <section style={seoCardStyle}>
+              <h2 style={seoTitleStyle}>Über diese Marktpreise</h2>
+              <p style={seoTextStyle}>
+                Die Marktpreise sind marktnahe Richtwerte für ausgewählte
+                Goldprodukte in Österreich und für türkisches Gold. Sie werden
+                aus Goldpreisdaten, Wechselkursen und eigenen Aufschlägen
+                berechnet und dienen ausschließlich der Orientierung.
+              </p>
+            </section>
           </>
         )}
 
-        {activeTab === "impressum" && (
+        <p style={footerSourceStyle}>
+          Datenquellen: Goldpreisdaten über externe API, Wechselkursdaten und
+          eigene Berechnungen.
+        </p>
+
+        <p style={updatedStyle}>
+          Letztes Update: {updated || "wird geladen …"}
+        </p>
+
+        <div style={bottomLegalNavStyle}>
+          <button
+            onClick={() =>
+              setLegalTab((prev) => (prev === "impressum" ? "none" : "impressum"))
+            }
+            style={{
+              ...bottomLegalButtonStyle,
+              ...(legalTab === "impressum" ? activeBottomLegalButtonStyle : {}),
+            }}
+          >
+            Impressum
+          </button>
+
+          <button
+            onClick={() =>
+              setLegalTab((prev) =>
+                prev === "disclaimer" ? "none" : "disclaimer"
+              )
+            }
+            style={{
+              ...bottomLegalButtonStyle,
+              ...(legalTab === "disclaimer"
+                ? activeBottomLegalButtonStyle
+                : {}),
+            }}
+          >
+            Disclaimer & Datenschutz
+          </button>
+        </div>
+
+        {legalTab === "impressum" && (
           <section style={cardStyle}>
             <h2 style={sectionTitleStyle}>Impressum</h2>
 
@@ -1058,11 +1116,15 @@ export default function Home() {
           </section>
         )}
 
-        {activeTab === "disclaimer" && (
+        {legalTab === "disclaimer" && (
           <section style={cardStyle}>
             <h2 style={sectionTitleStyle}>Disclaimer & Datenschutz</h2>
 
             <div style={legalTextStyle}>
+              <p>
+                <strong>Disclaimer</strong>
+              </p>
+
               <p>
                 Die auf dieser Website veröffentlichten Inhalte dienen
                 ausschließlich der allgemeinen Information.
@@ -1080,8 +1142,8 @@ export default function Home() {
               <p>
                 Sämtliche Preisangaben sind unverbindliche Richtwerte.
                 Abweichungen zu tatsächlichen Händler-, Ankauf-, Verkauf- oder
-                Produktpreisen sind jederzeit möglich. Technische
-                Goldpreisdaten werden über gold-api.com bezogen.
+                Produktpreisen sind jederzeit möglich. Technische Goldpreisdaten
+                werden über gold-api.com bezogen.
               </p>
 
               <p>
@@ -1107,14 +1169,16 @@ export default function Home() {
               <br />
 
               <p>
-                <strong>Datenschutzhinweis:</strong>
-                <br />
+                <strong>Datenschutz</strong>
+              </p>
+
+              <p>
                 Diese Website verarbeitet personenbezogene Daten nur in jenem
                 Umfang, der für den technischen Betrieb, die Bereitstellung der
                 Website sowie zur Reichweitenmessung und Verbesserung des
                 Angebots erforderlich ist.
               </p>
-<br />
+
               <p>
                 <strong>Hosting:</strong>
                 <br />
@@ -1124,7 +1188,7 @@ export default function Home() {
                 verarbeitet werden, soweit dies zur sicheren und stabilen
                 Bereitstellung der Website erforderlich ist.
               </p>
-<br />
+
               <p>
                 <strong>Analytics:</strong>
                 <br />
@@ -1135,7 +1199,7 @@ export default function Home() {
                 ausschließlich statistischen Zwecken und der Verbesserung des
                 Angebots.
               </p>
-<br />
+
               <p>
                 <strong>Cookies und Tracking:</strong>
                 <br />
@@ -1145,7 +1209,7 @@ export default function Home() {
                 Nutzungsdaten durch den Hosting- oder Analytics-Anbieter im
                 erforderlichen Umfang verarbeitet werden.
               </p>
-<br />
+
               <p>
                 <strong>Rechtsgrundlage:</strong>
                 <br />
@@ -1154,7 +1218,7 @@ export default function Home() {
                 technischen Fehlerbehebung sowie an der anonymisierten
                 statistischen Auswertung und Verbesserung unseres Online-Angebots.
               </p>
-<br />
+
               <p>
                 <strong>Speicherdauer:</strong>
                 <br />
@@ -1162,7 +1226,7 @@ export default function Home() {
                 für die genannten Zwecke erforderlich ist oder gesetzliche
                 Aufbewahrungspflichten bestehen.
               </p>
-<br />
+
               <p>
                 <strong>Ihre Rechte:</strong>
                 <br />
@@ -1173,7 +1237,7 @@ export default function Home() {
                 Datenschutzrecht verstößt, können Sie sich an die zuständige
                 Datenschutzbehörde wenden.
               </p>
-<br />
+
               <p>
                 <strong>Kontakt:</strong>
                 <br />
@@ -1184,13 +1248,6 @@ export default function Home() {
             </div>
           </section>
         )}
-
-        <p style={footerSourceStyle}>
-          Datenquellen: Externe Goldpreis-API, Wechselkursdaten und eigene
-          Berechnungen.
-        </p>
-
-        <p style={updatedStyle}>Letztes Update: {updated}</p>
       </div>
     </main>
   );
@@ -1223,9 +1280,28 @@ const infoStyle: React.CSSProperties = {
   fontSize: "15px",
 };
 
-const loadingStyle: React.CSSProperties = {
+const loadingBoxStyle: React.CSSProperties = {
   textAlign: "center",
   marginBottom: "20px",
+  backgroundColor: "#eef6ff",
+  border: "1px solid #bfdbfe",
+  color: "#1d4ed8",
+  borderRadius: "14px",
+  padding: "14px 16px",
+  fontSize: "15px",
+  fontWeight: 600,
+};
+
+const errorBoxStyle: React.CSSProperties = {
+  textAlign: "center",
+  marginBottom: "20px",
+  backgroundColor: "#fef2f2",
+  border: "1px solid #fecaca",
+  color: "#b91c1c",
+  borderRadius: "14px",
+  padding: "14px 16px",
+  fontSize: "15px",
+  fontWeight: 600,
 };
 
 const noticeBoxStyle: React.CSSProperties = {
@@ -1248,10 +1324,30 @@ const cardStyle: React.CSSProperties = {
   overflowX: "auto",
 };
 
+const seoCardStyle: React.CSSProperties = {
+  backgroundColor: "#ffffff",
+  borderRadius: "18px",
+  padding: "22px",
+  marginBottom: "24px",
+  boxShadow: "0 8px 24px rgba(0,0,0,0.08)",
+};
+
 const sectionTitleStyle: React.CSSProperties = {
   fontSize: "24px",
   marginBottom: "16px",
   color: "#111827",
+};
+
+const seoTitleStyle: React.CSSProperties = {
+  fontSize: "20px",
+  marginBottom: "10px",
+  color: "#111827",
+};
+
+const seoTextStyle: React.CSSProperties = {
+  color: "#374151",
+  lineHeight: 1.7,
+  fontSize: "15px",
 };
 
 const tableStyle: React.CSSProperties = {
@@ -1309,6 +1405,30 @@ const tabButton: React.CSSProperties = {
 const activeTabStyle: React.CSSProperties = {
   backgroundColor: "#111827",
   color: "#ffffff",
+};
+
+const bottomLegalNavStyle: React.CSSProperties = {
+  display: "flex",
+  justifyContent: "center",
+  gap: "12px",
+  marginTop: "16px",
+  marginBottom: "20px",
+  flexWrap: "wrap",
+};
+
+const bottomLegalButtonStyle: React.CSSProperties = {
+  border: "none",
+  background: "transparent",
+  color: "#374151",
+  cursor: "pointer",
+  textDecoration: "underline",
+  fontSize: "14px",
+  padding: "6px 8px",
+};
+
+const activeBottomLegalButtonStyle: React.CSSProperties = {
+  color: "#111827",
+  fontWeight: 700,
 };
 
 const legalTextStyle: React.CSSProperties = {
