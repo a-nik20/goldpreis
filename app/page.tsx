@@ -1178,7 +1178,7 @@ export default function Home() {
                 Website sowie zur Reichweitenmessung und Verbesserung des
                 Angebots erforderlich ist.
               </p>
-
+<br />
               <p>
                 <strong>Hosting:</strong>
                 <br />
@@ -1188,7 +1188,7 @@ export default function Home() {
                 verarbeitet werden, soweit dies zur sicheren und stabilen
                 Bereitstellung der Website erforderlich ist.
               </p>
-
+<br />
               <p>
                 <strong>Analytics:</strong>
                 <br />
@@ -1199,7 +1199,7 @@ export default function Home() {
                 ausschließlich statistischen Zwecken und der Verbesserung des
                 Angebots.
               </p>
-
+<br />
               <p>
                 <strong>Cookies und Tracking:</strong>
                 <br />
@@ -1209,7 +1209,7 @@ export default function Home() {
                 Nutzungsdaten durch den Hosting- oder Analytics-Anbieter im
                 erforderlichen Umfang verarbeitet werden.
               </p>
-
+<br />
               <p>
                 <strong>Rechtsgrundlage:</strong>
                 <br />
@@ -1218,7 +1218,7 @@ export default function Home() {
                 technischen Fehlerbehebung sowie an der anonymisierten
                 statistischen Auswertung und Verbesserung unseres Online-Angebots.
               </p>
-
+<br />
               <p>
                 <strong>Speicherdauer:</strong>
                 <br />
@@ -1226,7 +1226,7 @@ export default function Home() {
                 für die genannten Zwecke erforderlich ist oder gesetzliche
                 Aufbewahrungspflichten bestehen.
               </p>
-
+<br />
               <p>
                 <strong>Ihre Rechte:</strong>
                 <br />
@@ -1237,7 +1237,7 @@ export default function Home() {
                 Datenschutzrecht verstößt, können Sie sich an die zuständige
                 Datenschutzbehörde wenden.
               </p>
-
+<br />
               <p>
                 <strong>Kontakt:</strong>
                 <br />
