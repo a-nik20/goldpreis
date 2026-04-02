@@ -5,22 +5,33 @@ export const dynamic = "force-dynamic";
 
 type Currency = "EUR" | "TRY";
 
-type SingleRow = {
+type ProductMode = "ref" | "market";
+
+type BaseRow = {
   id: string;
   name: string;
+  favoriteKey: string;
+  chartKey: string;
+  dayStartValue: number | null;
+  dayStartText: string;
+};
+
+type SingleRow = BaseRow & {
   price: string;
   priceValue: number;
   liveDiffText: string;
   liveDiffValue: number | null;
   dayDiffText: string;
   dayDiffValue: number | null;
-  favoriteKey: string;
-  chartKey: string;
+  buyPrice: string;
+  buyPriceValue: number;
+  sellPrice: string;
+  sellPriceValue: number;
+  spreadText: string;
+  spreadValue: number;
 };
 
-type DualRow = {
-  id: string;
-  name: string;
+type DualRow = BaseRow & {
   priceEur: string;
   priceEurValue: number;
   priceTry: string;
@@ -31,8 +42,12 @@ type DualRow = {
   liveDiffValueTry: number | null;
   dayDiffText: string;
   dayDiffValue: number | null;
-  favoriteKey: string;
-  chartKey: string;
+  buyPriceEur: string;
+  buyPriceEurValue: number;
+  sellPriceEur: string;
+  sellPriceEurValue: number;
+  spreadTextEur: string;
+  spreadValueEur: number;
 };
 
 type Snapshot = {
@@ -64,6 +79,9 @@ const redis = new Redis({
 
 const OUNCE_IN_GRAMS = 31.1034768;
 
+/**
+ * Markt-Aufschläge für modellierte Verkaufspreise
+ */
 const MARKET_PREMIUMS = {
   general: {
     "Gold 1 g (24K Spotpreis)": 1.0,
@@ -102,6 +120,53 @@ const MARKET_PREMIUMS = {
     "Gold-Armreif 10 g (22 Ayar)": 1.082,
     "Gold-Armreif 15 g (22 Ayar)": 1.082,
     "Gold-Armreif 20 g (22 Ayar)": 1.082,
+  },
+} as const;
+
+/**
+ * Modellierte Ankaufsfaktoren.
+ * Verkauf = aktueller modellierter Preis
+ * Ankauf = etwas darunter
+ * Spread = Verkauf - Ankauf
+ */
+const BUY_FACTORS = {
+  general: {
+    "Gold 1 g (24K Spotpreis)": 0.992,
+    "Gold 1 oz (24K Spotpreis)": 0.994,
+    "Goldbarren 1 g": 0.955,
+    "Goldbarren 5 g": 0.97,
+    "Goldbarren 10 g": 0.976,
+    "Goldbarren 50 g": 0.985,
+    "Goldbarren 100 g": 0.988,
+  },
+  austria: {
+    "Wiener Philharmoniker 1 oz": 0.978,
+    "Wiener Philharmoniker 1/2 oz": 0.972,
+    "Wiener Philharmoniker 1/4 oz": 0.968,
+    "Wiener Philharmoniker 1/10 oz": 0.956,
+    "Wiener Philharmoniker 1/25 oz": 0.938,
+    "Franz Joseph 1-fach Dukat (3,44 g fein)": 0.968,
+    "Franz Joseph 4-fach Dukat (13,77 g fein)": 0.978,
+    "10 Kronen Gold (3,05 g fein)": 0.965,
+    "20 Kronen Gold (6,10 g fein)": 0.972,
+    "100 Kronen Gold (30,49 g fein)": 0.983,
+    "Vier Gulden Gold (2,90 g fein)": 0.963,
+    "Acht Gulden Gold (5,81 g fein)": 0.971,
+  },
+  turkey24k: {
+    "Gram Altın (1 g)": 0.992,
+    "Çeyrek Altın (1,75 g)": 0.985,
+    "Yarım Altın (3,50 g)": 0.986,
+    "Tam Altın (7,00 g)": 0.987,
+    "Reşat Altın (7,20 g)": 0.984,
+    "Gremse Altın (17,50 g)": 0.986,
+    "Große Reşat Gold (36,00 g)": 0.984,
+  },
+  turkey22k: {
+    "Gold-Armreif 1 g (22 Ayar)": 0.972,
+    "Gold-Armreif 10 g (22 Ayar)": 0.974,
+    "Gold-Armreif 15 g (22 Ayar)": 0.975,
+    "Gold-Armreif 20 g (22 Ayar)": 0.976,
   },
 } as const;
 
@@ -220,10 +285,10 @@ async function fetchJson<T>(url: string): Promise<T> {
 }
 
 async function buildSnapshot(): Promise<Snapshot> {
-  const gold = await fetchJson<GoldApiResponse>("https://api.gold-api.com/price/XAU");
-  const fx = await fetchJson<FxLatestResponse>(
-    "https://api.frankfurter.dev/v1/latest?base=EUR&symbols=USD,TRY"
-  );
+  const [gold, fx] = await Promise.all([
+    fetchJson<GoldApiResponse>("https://api.gold-api.com/price/XAU"),
+    fetchJson<FxLatestResponse>("https://api.frankfurter.dev/v1/latest?base=EUR&symbols=USD,TRY"),
+  ]);
 
   if (!gold?.price || !fx?.rates?.USD || !fx?.rates?.TRY) {
     throw new Error("Unvollständige externe Daten.");
@@ -273,12 +338,8 @@ async function buildSnapshot(): Promise<Snapshot> {
   for (const item of TURKEY_ITEMS) {
     const factor =
       item.karat === 22
-        ? MARKET_PREMIUMS.turkey22k[
-            item.name as keyof typeof MARKET_PREMIUMS.turkey22k
-          ] ?? 1
-        : MARKET_PREMIUMS.turkey24k[
-            item.name as keyof typeof MARKET_PREMIUMS.turkey24k
-          ] ?? 1;
+        ? MARKET_PREMIUMS.turkey22k[item.name as keyof typeof MARKET_PREMIUMS.turkey22k] ?? 1
+        : MARKET_PREMIUMS.turkey24k[item.name as keyof typeof MARKET_PREMIUMS.turkey24k] ?? 1;
 
     snapshot.marketTurkeyEur[item.name] = snapshot.refTurkeyEur[item.name] * factor;
     snapshot.marketTurkeyTry[item.name] = snapshot.refTurkeyTry[item.name] * factor;
@@ -298,156 +359,185 @@ async function appendIntradayHistory(dayKey: string, chartKey: string, value: nu
   await redis.ltrim(redisKey, -8000, -1);
 }
 
+function getBuyFactorForGeneral(name: string) {
+  return BUY_FACTORS.general[name as keyof typeof BUY_FACTORS.general] ?? 0.98;
+}
+
+function getBuyFactorForAustria(name: string) {
+  return BUY_FACTORS.austria[name as keyof typeof BUY_FACTORS.austria] ?? 0.975;
+}
+
+function getBuyFactorForTurkey24(name: string) {
+  return BUY_FACTORS.turkey24k[name as keyof typeof BUY_FACTORS.turkey24k] ?? 0.985;
+}
+
+function getBuyFactorForTurkey22(name: string) {
+  return BUY_FACTORS.turkey22k[name as keyof typeof BUY_FACTORS.turkey22k] ?? 0.975;
+}
+
+function buildSingleRow(
+  prefix: string,
+  mode: ProductMode,
+  name: string,
+  currentValue: number,
+  previousLiveValue: number | null,
+  dayStartValue: number | null,
+  buyFactor: number
+): SingleRow {
+  const liveDiff = calcAbsoluteDiff(currentValue, previousLiveValue);
+  const dayDiff = calcAbsoluteDiff(currentValue, dayStartValue);
+
+  const buyValue = currentValue * buyFactor;
+  const sellValue = currentValue;
+  const spreadValue = sellValue - buyValue;
+
+  return {
+    id: `${prefix}-${name}`,
+    name,
+    favoriteKey: `${prefix}::${name}`,
+    chartKey: `${mode}::${name}`,
+    dayStartValue,
+    dayStartText: dayStartValue === null ? "–" : formatCurrency(dayStartValue, "EUR"),
+    price: formatCurrency(currentValue, "EUR"),
+    priceValue: currentValue,
+    liveDiffText: formatAbsoluteDiff(liveDiff, "EUR"),
+    liveDiffValue: liveDiff,
+    dayDiffText: formatAbsoluteDiff(dayDiff, "EUR"),
+    dayDiffValue: dayDiff,
+    buyPrice: formatCurrency(buyValue, "EUR"),
+    buyPriceValue: buyValue,
+    sellPrice: formatCurrency(sellValue, "EUR"),
+    sellPriceValue: sellValue,
+    spreadText: formatCurrency(spreadValue, "EUR"),
+    spreadValue,
+  };
+}
+
+function buildDualRow(
+  prefix: string,
+  mode: ProductMode,
+  name: string,
+  currentEur: number,
+  currentTry: number,
+  previousLiveEur: number | null,
+  previousLiveTry: number | null,
+  dayStartEur: number | null,
+  buyFactor: number
+): DualRow {
+  const liveDiffEur = calcAbsoluteDiff(currentEur, previousLiveEur);
+  const liveDiffTry = calcAbsoluteDiff(currentTry, previousLiveTry);
+  const dayDiff = calcAbsoluteDiff(currentEur, dayStartEur);
+
+  const buyPriceEurValue = currentEur * buyFactor;
+  const sellPriceEurValue = currentEur;
+  const spreadValueEur = sellPriceEurValue - buyPriceEurValue;
+
+  return {
+    id: `${prefix}-${name}`,
+    name,
+    favoriteKey: `${prefix}::${name}`,
+    chartKey: `${mode}::${name}`,
+    dayStartValue: dayStartEur,
+    dayStartText: dayStartEur === null ? "–" : formatCurrency(dayStartEur, "EUR"),
+    priceEur: formatCurrency(currentEur, "EUR"),
+    priceEurValue: currentEur,
+    priceTry: formatCurrency(currentTry, "TRY"),
+    priceTryValue: currentTry,
+    liveDiffTextEur: formatAbsoluteDiff(liveDiffEur, "EUR"),
+    liveDiffValueEur: liveDiffEur,
+    liveDiffTextTry: formatAbsoluteDiff(liveDiffTry, "TRY"),
+    liveDiffValueTry: liveDiffTry,
+    dayDiffText: formatAbsoluteDiff(dayDiff, "EUR"),
+    dayDiffValue: dayDiff,
+    buyPriceEur: formatCurrency(buyPriceEurValue, "EUR"),
+    buyPriceEurValue,
+    sellPriceEur: formatCurrency(sellPriceEurValue, "EUR"),
+    sellPriceEurValue,
+    spreadTextEur: formatCurrency(spreadValueEur, "EUR"),
+    spreadValueEur,
+  };
+}
+
 function buildRows(
   current: Snapshot,
   previousLive: Snapshot,
   dayBaseline: Snapshot
 ) {
-  const refGeneral: SingleRow[] = GENERAL_ITEMS.map((item) => {
-    const currentValue = current.refGeneral[item.name];
-    const liveDiff = calcAbsoluteDiff(currentValue, previousLive.refGeneral[item.name] ?? null);
-    const dayDiff = calcAbsoluteDiff(currentValue, dayBaseline.refGeneral[item.name] ?? null);
+  const refGeneral: SingleRow[] = GENERAL_ITEMS.map((item) =>
+    buildSingleRow(
+      "refGeneral",
+      "ref",
+      item.name,
+      current.refGeneral[item.name],
+      previousLive.refGeneral[item.name] ?? null,
+      dayBaseline.refGeneral[item.name] ?? null,
+      getBuyFactorForGeneral(item.name)
+    )
+  );
 
-    return {
-      id: `ref-general-${item.name}`,
-      name: item.name,
-      price: formatCurrency(currentValue, "EUR"),
-      priceValue: currentValue,
-      liveDiffText: formatAbsoluteDiff(liveDiff, "EUR"),
-      liveDiffValue: liveDiff,
-      dayDiffText: formatAbsoluteDiff(dayDiff, "EUR"),
-      dayDiffValue: dayDiff,
-      favoriteKey: `refGeneral::${item.name}`,
-      chartKey: `ref::${item.name}`,
-    };
-  });
+  const refAustria: SingleRow[] = AUSTRIA_ITEMS.map((item) =>
+    buildSingleRow(
+      "refAustria",
+      "ref",
+      item.name,
+      current.refAustria[item.name],
+      previousLive.refAustria[item.name] ?? null,
+      dayBaseline.refAustria[item.name] ?? null,
+      getBuyFactorForAustria(item.name)
+    )
+  );
 
-  const refAustria: SingleRow[] = AUSTRIA_ITEMS.map((item) => {
-    const currentValue = current.refAustria[item.name];
-    const liveDiff = calcAbsoluteDiff(currentValue, previousLive.refAustria[item.name] ?? null);
-    const dayDiff = calcAbsoluteDiff(currentValue, dayBaseline.refAustria[item.name] ?? null);
+  const refTurkey: DualRow[] = TURKEY_ITEMS.map((item) =>
+    buildDualRow(
+      "refTurkey",
+      "ref",
+      item.name,
+      current.refTurkeyEur[item.name],
+      current.refTurkeyTry[item.name],
+      previousLive.refTurkeyEur[item.name] ?? null,
+      previousLive.refTurkeyTry[item.name] ?? null,
+      dayBaseline.refTurkeyEur[item.name] ?? null,
+      item.karat === 22 ? getBuyFactorForTurkey22(item.name) : getBuyFactorForTurkey24(item.name)
+    )
+  );
 
-    return {
-      id: `ref-austria-${item.name}`,
-      name: item.name,
-      price: formatCurrency(currentValue, "EUR"),
-      priceValue: currentValue,
-      liveDiffText: formatAbsoluteDiff(liveDiff, "EUR"),
-      liveDiffValue: liveDiff,
-      dayDiffText: formatAbsoluteDiff(dayDiff, "EUR"),
-      dayDiffValue: dayDiff,
-      favoriteKey: `refAustria::${item.name}`,
-      chartKey: `ref::${item.name}`,
-    };
-  });
+  const marketGeneral: SingleRow[] = GENERAL_ITEMS.map((item) =>
+    buildSingleRow(
+      "marketGeneral",
+      "market",
+      item.name,
+      current.marketGeneral[item.name],
+      previousLive.marketGeneral[item.name] ?? null,
+      dayBaseline.marketGeneral[item.name] ?? null,
+      getBuyFactorForGeneral(item.name)
+    )
+  );
 
-  const refTurkey: DualRow[] = TURKEY_ITEMS.map((item) => {
-    const currentEur = current.refTurkeyEur[item.name];
-    const currentTry = current.refTurkeyTry[item.name];
+  const marketAustria: SingleRow[] = AUSTRIA_ITEMS.map((item) =>
+    buildSingleRow(
+      "marketAustria",
+      "market",
+      item.name,
+      current.marketAustria[item.name],
+      previousLive.marketAustria[item.name] ?? null,
+      dayBaseline.marketAustria[item.name] ?? null,
+      getBuyFactorForAustria(item.name)
+    )
+  );
 
-    const liveDiffEur = calcAbsoluteDiff(
-      currentEur,
-      previousLive.refTurkeyEur[item.name] ?? null
-    );
-    const liveDiffTry = calcAbsoluteDiff(
-      currentTry,
-      previousLive.refTurkeyTry[item.name] ?? null
-    );
-    const dayDiff = calcAbsoluteDiff(
-      currentEur,
-      dayBaseline.refTurkeyEur[item.name] ?? null
-    );
-
-    return {
-      id: `ref-turkey-${item.name}`,
-      name: item.name,
-      priceEur: formatCurrency(currentEur, "EUR"),
-      priceEurValue: currentEur,
-      priceTry: formatCurrency(currentTry, "TRY"),
-      priceTryValue: currentTry,
-      liveDiffTextEur: formatAbsoluteDiff(liveDiffEur, "EUR"),
-      liveDiffValueEur: liveDiffEur,
-      liveDiffTextTry: formatAbsoluteDiff(liveDiffTry, "TRY"),
-      liveDiffValueTry: liveDiffTry,
-      dayDiffText: formatAbsoluteDiff(dayDiff, "EUR"),
-      dayDiffValue: dayDiff,
-      favoriteKey: `refTurkey::${item.name}`,
-      chartKey: `ref::${item.name}`,
-    };
-  });
-
-  const marketGeneral: SingleRow[] = GENERAL_ITEMS.map((item) => {
-    const currentValue = current.marketGeneral[item.name];
-    const liveDiff = calcAbsoluteDiff(currentValue, previousLive.marketGeneral[item.name] ?? null);
-    const dayDiff = calcAbsoluteDiff(currentValue, dayBaseline.marketGeneral[item.name] ?? null);
-
-    return {
-      id: `market-general-${item.name}`,
-      name: item.name,
-      price: formatCurrency(currentValue, "EUR"),
-      priceValue: currentValue,
-      liveDiffText: formatAbsoluteDiff(liveDiff, "EUR"),
-      liveDiffValue: liveDiff,
-      dayDiffText: formatAbsoluteDiff(dayDiff, "EUR"),
-      dayDiffValue: dayDiff,
-      favoriteKey: `marketGeneral::${item.name}`,
-      chartKey: `market::${item.name}`,
-    };
-  });
-
-  const marketAustria: SingleRow[] = AUSTRIA_ITEMS.map((item) => {
-    const currentValue = current.marketAustria[item.name];
-    const liveDiff = calcAbsoluteDiff(currentValue, previousLive.marketAustria[item.name] ?? null);
-    const dayDiff = calcAbsoluteDiff(currentValue, dayBaseline.marketAustria[item.name] ?? null);
-
-    return {
-      id: `market-austria-${item.name}`,
-      name: item.name,
-      price: formatCurrency(currentValue, "EUR"),
-      priceValue: currentValue,
-      liveDiffText: formatAbsoluteDiff(liveDiff, "EUR"),
-      liveDiffValue: liveDiff,
-      dayDiffText: formatAbsoluteDiff(dayDiff, "EUR"),
-      dayDiffValue: dayDiff,
-      favoriteKey: `marketAustria::${item.name}`,
-      chartKey: `market::${item.name}`,
-    };
-  });
-
-  const marketTurkey: DualRow[] = TURKEY_ITEMS.map((item) => {
-    const currentEur = current.marketTurkeyEur[item.name];
-    const currentTry = current.marketTurkeyTry[item.name];
-
-    const liveDiffEur = calcAbsoluteDiff(
-      currentEur,
-      previousLive.marketTurkeyEur[item.name] ?? null
-    );
-    const liveDiffTry = calcAbsoluteDiff(
-      currentTry,
-      previousLive.marketTurkeyTry[item.name] ?? null
-    );
-    const dayDiff = calcAbsoluteDiff(
-      currentEur,
-      dayBaseline.marketTurkeyEur[item.name] ?? null
-    );
-
-    return {
-      id: `market-turkey-${item.name}`,
-      name: item.name,
-      priceEur: formatCurrency(currentEur, "EUR"),
-      priceEurValue: currentEur,
-      priceTry: formatCurrency(currentTry, "TRY"),
-      priceTryValue: currentTry,
-      liveDiffTextEur: formatAbsoluteDiff(liveDiffEur, "EUR"),
-      liveDiffValueEur: liveDiffEur,
-      liveDiffTextTry: formatAbsoluteDiff(liveDiffTry, "TRY"),
-      liveDiffValueTry: liveDiffTry,
-      dayDiffText: formatAbsoluteDiff(dayDiff, "EUR"),
-      dayDiffValue: dayDiff,
-      favoriteKey: `marketTurkey::${item.name}`,
-      chartKey: `market::${item.name}`,
-    };
-  });
+  const marketTurkey: DualRow[] = TURKEY_ITEMS.map((item) =>
+    buildDualRow(
+      "marketTurkey",
+      "market",
+      item.name,
+      current.marketTurkeyEur[item.name],
+      current.marketTurkeyTry[item.name],
+      previousLive.marketTurkeyEur[item.name] ?? null,
+      previousLive.marketTurkeyTry[item.name] ?? null,
+      dayBaseline.marketTurkeyEur[item.name] ?? null,
+      item.karat === 22 ? getBuyFactorForTurkey22(item.name) : getBuyFactorForTurkey24(item.name)
+    )
+  );
 
   return {
     refGeneral,

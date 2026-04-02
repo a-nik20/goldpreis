@@ -156,6 +156,10 @@ function parseIntradayEntry(entry: unknown): IntradayEntry | null {
   return null;
 }
 
+function cleanTitle(chartKey: string) {
+  return chartKey.replace(/^ref::/, "").replace(/^market::/, "");
+}
+
 export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
@@ -168,8 +172,6 @@ export async function GET(request: Request) {
         { status: 400 }
       );
     }
-
-    const cleanTitle = chartKey.replace(/^ref::/, "").replace(/^market::/, "");
 
     if (range === "day") {
       const dayKey = getViennaDayKey();
@@ -187,7 +189,7 @@ export async function GET(request: Request) {
       return Response.json({
         chartKey,
         range,
-        title: `${cleanTitle} – Tagesansicht`,
+        title: `${cleanTitle(chartKey)} – Tagesansicht`,
         currency: "EUR",
         points,
       });
@@ -208,15 +210,20 @@ export async function GET(request: Request) {
             label: formatWeekLabel(date),
             value,
           });
+        } else {
+          points.push({
+            label: formatWeekLabel(date),
+            value: NaN,
+          });
         }
       }
 
       return Response.json({
         chartKey,
         range,
-        title: `${cleanTitle} – Kalenderwoche (Mo–So)`,
+        title: `${cleanTitle(chartKey)} – Kalenderwoche (Mo–So)`,
         currency: "EUR",
-        points,
+        points: points.filter((point) => !Number.isNaN(point.value)),
       });
     }
 
@@ -240,7 +247,7 @@ export async function GET(request: Request) {
     return Response.json({
       chartKey,
       range,
-      title: `${cleanTitle} – Kalendermonat`,
+      title: `${cleanTitle(chartKey)} – Kalendermonat`,
       currency: "EUR",
       points,
     });

@@ -7,22 +7,31 @@ type LegalTab = "none" | "impressum" | "disclaimer" | "calculation";
 type SortKey = "default" | "name-asc" | "name-desc" | "price-asc" | "price-desc";
 type ChartRange = "day" | "week" | "month";
 
-type SingleRow = {
+type BaseRow = {
   id: string;
   name: string;
+  favoriteKey: string;
+  chartKey: string;
+  dayStartValue: number | null;
+  dayStartText: string;
+};
+
+type SingleRow = BaseRow & {
   price: string;
   priceValue: number;
   liveDiffText: string;
   liveDiffValue: number | null;
   dayDiffText: string;
   dayDiffValue: number | null;
-  favoriteKey: string;
-  chartKey: string;
+  buyPrice: string;
+  buyPriceValue: number;
+  sellPrice: string;
+  sellPriceValue: number;
+  spreadText: string;
+  spreadValue: number;
 };
 
-type DualRow = {
-  id: string;
-  name: string;
+type DualRow = BaseRow & {
   priceEur: string;
   priceEurValue: number;
   priceTry: string;
@@ -33,8 +42,12 @@ type DualRow = {
   liveDiffValueTry: number | null;
   dayDiffText: string;
   dayDiffValue: number | null;
-  favoriteKey: string;
-  chartKey: string;
+  buyPriceEur: string;
+  buyPriceEurValue: number;
+  sellPriceEur: string;
+  sellPriceEurValue: number;
+  spreadTextEur: string;
+  spreadValueEur: number;
 };
 
 type PricesResponse = {
@@ -61,6 +74,14 @@ type HistoryResponse = {
   points: HistoryPoint[];
 };
 
+type AlertItem = {
+  id: string;
+  productName: string;
+  targetPrice: number;
+  direction: "below" | "above";
+  active: boolean;
+};
+
 type CalculatorPreset = {
   label: string;
   mode: TabMode;
@@ -70,7 +91,8 @@ type CalculatorPreset = {
 };
 
 const REFRESH_INTERVAL_MS = 15000;
-const FAVORITES_KEY = "goldpreis_favorites_v5";
+const FAVORITES_KEY = "goldpreis_favorites_v6";
+const ALERTS_KEY = "goldpreis_alerts_v1";
 
 const CALCULATOR_PRESETS: CalculatorPreset[] = [
   { label: "Keine Vorlage", mode: "ref", karat: 24, weight: "10", currency: "EUR" },
@@ -103,8 +125,54 @@ function normalizeSearchText(text: string) {
     .replace(/ö/g, "o")
     .replace(/ş/g, "s")
     .replace(/ü/g, "u")
+    .replace(/1\/2/g, "halb")
+    .replace(/1\/4/g, "viertel")
+    .replace(/1\/10/g, "zehntel")
+    .replace(/1\/25/g, "funfundzwanzigstel")
     .replace(/[^a-z0-9]+/g, " ")
     .trim();
+}
+
+function buildSearchAliases(name: string) {
+  const base = normalizeSearchText(name);
+  const aliases = new Set<string>([base]);
+
+  if (base.includes("ceyrek")) {
+    aliases.add("ceyrek altin");
+    aliases.add("c quarter altin");
+  }
+  if (base.includes("yarim")) {
+    aliases.add("yarim altin");
+  }
+  if (base.includes("tam")) {
+    aliases.add("tam altin");
+  }
+  if (base.includes("resat")) {
+    aliases.add("resat");
+    aliases.add("resat altin");
+  }
+  if (base.includes("gram altin")) {
+    aliases.add("gram altin");
+    aliases.add("altin gram");
+  }
+  if (base.includes("gold armreif")) {
+    aliases.add("armreif");
+    aliases.add("armband gold");
+    aliases.add("22 ayar");
+  }
+  if (base.includes("wiener philharmoniker")) {
+    aliases.add("philharmoniker");
+    aliases.add("wiener");
+    aliases.add("1 oz");
+    aliases.add("unze");
+  }
+  if (base.includes("goldbarren")) {
+    aliases.add("barren");
+    aliases.add("gold bar");
+    aliases.add("bar");
+  }
+
+  return Array.from(aliases);
 }
 
 function getTrendColor(value: number | null) {
@@ -121,7 +189,7 @@ function getTrendArrow(value: number | null) {
   return "→";
 }
 
-function buildPath(points: HistoryPoint[], width: number, height: number, padding: number) {
+function buildSmoothPath(points: HistoryPoint[], width: number, height: number, padding: number) {
   if (points.length === 0) return "";
   if (points.length === 1) {
     const y = height / 2;
@@ -133,15 +201,21 @@ function buildPath(points: HistoryPoint[], width: number, height: number, paddin
   const max = Math.max(...values);
   const range = max - min || 1;
 
-  return points
-    .map((point, index) => {
-      const x = padding + (index / (points.length - 1)) * (width - padding * 2);
-      const y =
-        height - padding - ((point.value - min) / range) * (height - padding * 2);
+  const coords = points.map((point, index) => {
+    const x = padding + (index / (points.length - 1)) * (width - padding * 2);
+    const y = height - padding - ((point.value - min) / range) * (height - padding * 2);
+    return { x, y };
+  });
 
-      return `${index === 0 ? "M" : "L"} ${x} ${y}`;
-    })
-    .join(" ");
+  let path = `M ${coords[0].x} ${coords[0].y}`;
+  for (let i = 1; i < coords.length; i++) {
+    const prev = coords[i - 1];
+    const current = coords[i];
+    const midX = (prev.x + current.x) / 2;
+    path += ` Q ${midX} ${prev.y} ${current.x} ${current.y}`;
+  }
+
+  return path;
 }
 
 function getDayAxisLabels(points: HistoryPoint[]) {
@@ -277,7 +351,7 @@ function HistoryChart({
   const width = 920;
   const height = 280;
   const padding = 28;
-  const path = buildPath(points, width, height, padding);
+  const path = buildSmoothPath(points, width, height, padding);
 
   const values = points.map((point) => point.value);
   const min = values.length ? Math.min(...values) : 0;
@@ -298,6 +372,19 @@ function HistoryChart({
       : range === "week"
       ? getWeekAxisLabels(points)
       : getMonthAxisLabels(points);
+
+  const chartPoints = useMemo(() => {
+    if (points.length === 0) return [];
+    const rangeValue = max - min || 1;
+
+    return points.map((point, index) => {
+      const x = padding + (index / (points.length - 1 || 1)) * (width - padding * 2);
+      const y = height - padding - ((point.value - min) / rangeValue) * (height - padding * 2);
+      return { ...point, x, y };
+    });
+  }, [points, min, max]);
+
+  const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
 
   return (
     <div style={historyWrapStyle}>
@@ -320,17 +407,43 @@ function HistoryChart({
         <div style={emptyStateStyle}>Für diesen Zeitraum sind noch keine Verlaufsdaten vorhanden.</div>
       ) : (
         <>
-          <div style={{ overflowX: "auto" }}>
+          <div style={chartOuterStyle}>
             <svg
               viewBox={`0 0 ${width} ${height}`}
-              style={{ width: "100%", minWidth: "720px", height: "280px", display: "block" }}
+              style={{ width: "100%", minWidth: "720px", height: "300px", display: "block" }}
               role="img"
               aria-label={title}
             >
               <line x1="28" y1="28" x2="28" y2="252" stroke="#d1d5db" strokeWidth="1" />
               <line x1="28" y1="252" x2="892" y2="252" stroke="#d1d5db" strokeWidth="1" />
-              <path d={path} fill="none" stroke="#111827" strokeWidth="3" strokeLinecap="round" />
+              <path
+                d={path}
+                fill="none"
+                stroke={diff >= 0 ? "#16a34a" : "#dc2626"}
+                strokeWidth="3.5"
+                strokeLinecap="round"
+              />
+
+              {chartPoints.map((point, index) => (
+                <g key={`${point.label}-${index}`}>
+                  <circle
+                    cx={point.x}
+                    cy={point.y}
+                    r={hoveredIndex === index ? 6 : 3.5}
+                    fill={hoveredIndex === index ? "#111827" : "#374151"}
+                    onMouseEnter={() => setHoveredIndex(index)}
+                    onMouseLeave={() => setHoveredIndex(null)}
+                  />
+                </g>
+              ))}
             </svg>
+
+            {hoveredIndex !== null && chartPoints[hoveredIndex] && (
+              <div style={chartTooltipStyle}>
+                <strong>{chartPoints[hoveredIndex].label}</strong>
+                <div>{formatter.format(chartPoints[hoveredIndex].value)}</div>
+              </div>
+            )}
           </div>
 
           <div style={historyLabelsStyle}>
@@ -384,15 +497,29 @@ export default function Home() {
   const [calculatorCurrency, setCalculatorCurrency] = useState<"EUR" | "TRY">("EUR");
   const [calculatorPreset, setCalculatorPreset] = useState("Keine Vorlage");
 
+  const [alerts, setAlerts] = useState<AlertItem[]>([]);
+  const [alertProduct, setAlertProduct] = useState("");
+  const [alertTarget, setAlertTarget] = useState("");
+  const [alertDirection, setAlertDirection] = useState<"below" | "above">("below");
+
   const searchBoxRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
-    const stored = localStorage.getItem(FAVORITES_KEY);
-    if (stored) {
+    const storedFavorites = localStorage.getItem(FAVORITES_KEY);
+    if (storedFavorites) {
       try {
-        setFavorites(JSON.parse(stored));
+        setFavorites(JSON.parse(storedFavorites));
       } catch {
         setFavorites([]);
+      }
+    }
+
+    const storedAlerts = localStorage.getItem(ALERTS_KEY);
+    if (storedAlerts) {
+      try {
+        setAlerts(JSON.parse(storedAlerts));
+      } catch {
+        setAlerts([]);
       }
     }
   }, []);
@@ -412,6 +539,11 @@ export default function Home() {
   function persistFavorites(next: string[]) {
     setFavorites(next);
     localStorage.setItem(FAVORITES_KEY, JSON.stringify(next));
+  }
+
+  function persistAlerts(next: AlertItem[]) {
+    setAlerts(next);
+    localStorage.setItem(ALERTS_KEY, JSON.stringify(next));
   }
 
   function toggleFavorite(key: string) {
@@ -481,6 +613,10 @@ export default function Home() {
     ];
   }, [refGeneral, refAustria, marketGeneral, marketAustria, refTurkey, marketTurkey]);
 
+  const favoriteRows = useMemo(() => {
+    return allRows.filter((row) => favorites.includes(row.favoriteKey));
+  }, [allRows, favorites]);
+
   const suggestionNames = useMemo(() => {
     const unique = new Map<string, string>();
 
@@ -497,18 +633,23 @@ export default function Home() {
     if (!normalizedQuery) return [];
 
     return suggestionNames
-      .filter((name) => normalizeSearchText(name).includes(normalizedQuery))
+      .filter((name) => {
+        const aliases = buildSearchAliases(name);
+        return aliases.some((alias) => alias.includes(normalizedQuery));
+      })
       .slice(0, 8);
   }, [suggestionNames, normalizedQuery]);
 
+  function matchesSmartSearch(name: string) {
+    if (!normalizedQuery) return true;
+    const aliases = buildSearchAliases(name);
+    return aliases.some((alias) => alias.includes(normalizedQuery));
+  }
+
   function filterAndSortSingle(rows: SingleRow[]) {
     const filtered = rows.filter((row) => {
-      const matchesSearch = !normalizedQuery
-        ? true
-        : normalizeSearchText(row.name).includes(normalizedQuery);
-
+      const matchesSearch = matchesSmartSearch(row.name);
       const matchesFavorites = onlyFavorites ? favorites.includes(row.favoriteKey) : true;
-
       return matchesSearch && matchesFavorites;
     });
 
@@ -528,12 +669,8 @@ export default function Home() {
 
   function filterAndSortDual(rows: DualRow[]) {
     const filtered = rows.filter((row) => {
-      const matchesSearch = !normalizedQuery
-        ? true
-        : normalizeSearchText(row.name).includes(normalizedQuery);
-
+      const matchesSearch = matchesSmartSearch(row.name);
       const matchesFavorites = onlyFavorites ? favorites.includes(row.favoriteKey) : true;
-
       return matchesSearch && matchesFavorites;
     });
 
@@ -580,7 +717,6 @@ export default function Home() {
 
   useEffect(() => {
     if (!chartOptions.length) return;
-
     if (!selectedChartKey || !chartOptions.some((item) => item.key === selectedChartKey)) {
       setSelectedChartKey(chartOptions[0].key);
     }
@@ -614,6 +750,45 @@ export default function Home() {
 
     loadHistory();
   }, [selectedChartKey, chartRange]);
+
+  useEffect(() => {
+    if (!("Notification" in window)) return;
+
+    const productMap = new Map<string, number>();
+
+    for (const row of allRows) {
+      if ("priceValue" in row) {
+        productMap.set(row.name, row.priceValue);
+      } else {
+        productMap.set(row.name, row.priceEurValue);
+      }
+    }
+
+    const updatedAlerts = alerts.map((alert) => {
+      if (!alert.active) return alert;
+
+      const currentPrice = productMap.get(alert.productName);
+      if (currentPrice === undefined) return alert;
+
+      const hitBelow = alert.direction === "below" && currentPrice <= alert.targetPrice;
+      const hitAbove = alert.direction === "above" && currentPrice >= alert.targetPrice;
+
+      if (hitBelow || hitAbove) {
+        if (Notification.permission === "granted") {
+          new Notification("Goldpreis-Alarm", {
+            body: `${alert.productName}: ${currentPrice.toFixed(2)} €`,
+          });
+        }
+        return { ...alert, active: false };
+      }
+
+      return alert;
+    });
+
+    if (JSON.stringify(updatedAlerts) !== JSON.stringify(alerts)) {
+      persistAlerts(updatedAlerts);
+    }
+  }, [allRows, alerts]);
 
   const eur24Ref = refGeneral.find((row) => row.name === "Gold 1 g (24K Spotpreis)")?.priceValue ?? 0;
   const eur24Market =
@@ -649,6 +824,15 @@ export default function Home() {
         : tryPerGram * weightValue
       : null;
 
+  const calculatorBuy =
+    calculatorResult !== null ? calculatorResult * 0.975 : null;
+  const calculatorSell =
+    calculatorResult !== null ? calculatorResult * 1.0 : null;
+  const calculatorSpread =
+    calculatorResult !== null && calculatorBuy !== null && calculatorSell !== null
+      ? calculatorSell - calculatorBuy
+      : null;
+
   const calculatorFormatted =
     calculatorResult === null
       ? null
@@ -657,6 +841,33 @@ export default function Home() {
           currency: calculatorCurrency,
           maximumFractionDigits: 2,
         }).format(calculatorResult);
+
+  const calculatorBuyFormatted =
+    calculatorBuy === null
+      ? null
+      : new Intl.NumberFormat("de-AT", {
+          style: "currency",
+          currency: calculatorCurrency,
+          maximumFractionDigits: 2,
+        }).format(calculatorBuy);
+
+  const calculatorSellFormatted =
+    calculatorSell === null
+      ? null
+      : new Intl.NumberFormat("de-AT", {
+          style: "currency",
+          currency: calculatorCurrency,
+          maximumFractionDigits: 2,
+        }).format(calculatorSell);
+
+  const calculatorSpreadFormatted =
+    calculatorSpread === null
+      ? null
+      : new Intl.NumberFormat("de-AT", {
+          style: "currency",
+          currency: calculatorCurrency,
+          maximumFractionDigits: 2,
+        }).format(calculatorSpread);
 
   const emailDisplay = "a_nikbay [at] outlook [dot] com";
   const realEmail = "a_nikbay@outlook.com";
@@ -682,6 +893,71 @@ export default function Home() {
     setCalculatorCurrency(preset.currency);
   }
 
+  async function createAlert() {
+    const priceValue = Number(alertTarget.replace(",", "."));
+    if (!alertProduct || Number.isNaN(priceValue) || priceValue <= 0) {
+      alert("Bitte Produkt und gültigen Zielpreis eingeben.");
+      return;
+    }
+
+    if ("Notification" in window && Notification.permission === "default") {
+      await Notification.requestPermission();
+    }
+
+    const next: AlertItem[] = [
+      ...alerts,
+      {
+        id: `${Date.now()}`,
+        productName: alertProduct,
+        targetPrice: priceValue,
+        direction: alertDirection,
+        active: true,
+      },
+    ];
+
+    persistAlerts(next);
+    setAlertTarget("");
+  }
+
+  function removeAlert(id: string) {
+    persistAlerts(alerts.filter((item) => item.id !== id));
+  }
+
+  function FavoriteStripCard({
+    row,
+  }: {
+    row: SingleRow | DualRow;
+  }) {
+    const isDual = "priceEur" in row;
+
+    return (
+      <div style={favoriteCardStyle}>
+        <div style={favoriteCardHeaderStyle}>
+          <strong>{row.name}</strong>
+          <FavoriteButton
+            active={favorites.includes(row.favoriteKey)}
+            onClick={() => toggleFavorite(row.favoriteKey)}
+          />
+        </div>
+
+        <div style={favoriteCardBodyStyle}>
+          {isDual ? (
+            <>
+              <div>Preis EUR: {row.priceEur}</div>
+              <div>Preis TRY: {row.priceTry}</div>
+              <div>Spread: {row.spreadTextEur}</div>
+            </>
+          ) : (
+            <>
+              <div>Preis: {row.price}</div>
+              <div>Spread: {row.spreadText}</div>
+            </>
+          )}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <main style={pageStyle}>
       <div style={containerStyle}>
@@ -691,6 +967,13 @@ export default function Home() {
           Aktuelle Referenzpreise und marktnahe Richtwerte für Gold in Österreich,
           Wiener Philharmoniker, Dukaten, Goldbarren und türkisches Gold in Euro und Türkischer Lira.
         </p>
+
+        <div style={trustBarStyle}>
+          <span>✔ Keine Anlageberatung</span>
+          <span>✔ Reine Richtwerte</span>
+          <span>✔ Keine Händlertexte kopiert</span>
+          <span>✔ Serverseitiges Preisarchiv</span>
+        </div>
 
         <div style={tabContainer}>
           <button
@@ -740,6 +1023,17 @@ export default function Home() {
           </div>
         </div>
 
+        {favoriteRows.length > 0 && (
+          <section style={cardStyle}>
+            <h2 style={sectionTitleStyle}>⭐ Deine Favoriten</h2>
+            <div style={favoriteGridStyle}>
+              {favoriteRows.map((row) => (
+                <FavoriteStripCard key={row.favoriteKey} row={row} />
+              ))}
+            </div>
+          </section>
+        )}
+
         <div style={toolbarStyle}>
           <div style={toolbarGroupStyle} ref={searchBoxRef}>
             <label style={labelStyle}>
@@ -751,7 +1045,7 @@ export default function Home() {
                   setShowSuggestions(true);
                 }}
                 onFocus={() => setShowSuggestions(true)}
-                placeholder="z. B. ceyrek altin"
+                placeholder="z. B. ceyrek altin, barren, philharmoniker"
                 style={inputStyle}
               />
             </label>
@@ -853,30 +1147,31 @@ export default function Home() {
                     <tr>
                       <th style={favoriteThStyle}>★</th>
                       <th style={thStyle}>Produkt</th>
+                      <th style={thStyle}>Tagesstart</th>
                       <th style={thStyle}>Preis inkl. Live-Differenz</th>
                       <th style={thStyle}>Änderung zum Vortag (EUR)</th>
+                      <th style={thStyle}>Ankauf</th>
+                      <th style={thStyle}>Verkauf</th>
+                      <th style={thStyle}>Spread</th>
                     </tr>
                   </thead>
                   <tbody>
                     {visibleRefGeneral.map((row) => (
                       <tr key={row.id}>
                         <td style={favoriteTdStyle}>
-                          <FavoriteButton
-                            active={favorites.includes(row.favoriteKey)}
-                            onClick={() => toggleFavorite(row.favoriteKey)}
-                          />
+                          <FavoriteButton active={favorites.includes(row.favoriteKey)} onClick={() => toggleFavorite(row.favoriteKey)} />
                         </td>
                         <td style={tdStyle}>{row.name}</td>
+                        <td style={tdStyle}>{row.dayStartText}</td>
                         <td style={tdStyle}>
-                          <InlinePrice
-                            value={row.price}
-                            diffText={row.liveDiffText}
-                            diffValue={row.liveDiffValue}
-                          />
+                          <InlinePrice value={row.price} diffText={row.liveDiffText} diffValue={row.liveDiffValue} />
                         </td>
                         <td style={tdStyle}>
                           <DayDiffCell text={row.dayDiffText} value={row.dayDiffValue} />
                         </td>
+                        <td style={tdStyle}>{row.buyPrice}</td>
+                        <td style={tdStyle}>{row.sellPrice}</td>
+                        <td style={tdStyle}>{row.spreadText}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -894,30 +1189,31 @@ export default function Home() {
                     <tr>
                       <th style={favoriteThStyle}>★</th>
                       <th style={thStyle}>Produkt</th>
+                      <th style={thStyle}>Tagesstart</th>
                       <th style={thStyle}>Preis inkl. Live-Differenz</th>
                       <th style={thStyle}>Änderung zum Vortag (EUR)</th>
+                      <th style={thStyle}>Ankauf</th>
+                      <th style={thStyle}>Verkauf</th>
+                      <th style={thStyle}>Spread</th>
                     </tr>
                   </thead>
                   <tbody>
                     {visibleRefAustria.map((row) => (
                       <tr key={row.id}>
                         <td style={favoriteTdStyle}>
-                          <FavoriteButton
-                            active={favorites.includes(row.favoriteKey)}
-                            onClick={() => toggleFavorite(row.favoriteKey)}
-                          />
+                          <FavoriteButton active={favorites.includes(row.favoriteKey)} onClick={() => toggleFavorite(row.favoriteKey)} />
                         </td>
                         <td style={tdStyle}>{row.name}</td>
+                        <td style={tdStyle}>{row.dayStartText}</td>
                         <td style={tdStyle}>
-                          <InlinePrice
-                            value={row.price}
-                            diffText={row.liveDiffText}
-                            diffValue={row.liveDiffValue}
-                          />
+                          <InlinePrice value={row.price} diffText={row.liveDiffText} diffValue={row.liveDiffValue} />
                         </td>
                         <td style={tdStyle}>
                           <DayDiffCell text={row.dayDiffText} value={row.dayDiffValue} />
                         </td>
+                        <td style={tdStyle}>{row.buyPrice}</td>
+                        <td style={tdStyle}>{row.sellPrice}</td>
+                        <td style={tdStyle}>{row.spreadText}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -935,38 +1231,35 @@ export default function Home() {
                     <tr>
                       <th style={favoriteThStyle}>★</th>
                       <th style={thStyle}>Produkt</th>
+                      <th style={thStyle}>Tagesstart</th>
                       <th style={thStyle}>Preis in Euro inkl. Live-Differenz</th>
                       <th style={thStyle}>Preis in Türkischer Lira inkl. Live-Differenz</th>
                       <th style={thStyle}>Änderung zum Vortag (EUR)</th>
+                      <th style={thStyle}>Ankauf (EUR)</th>
+                      <th style={thStyle}>Verkauf (EUR)</th>
+                      <th style={thStyle}>Spread (EUR)</th>
                     </tr>
                   </thead>
                   <tbody>
                     {visibleRefTurkey.map((row) => (
                       <tr key={row.id}>
                         <td style={favoriteTdStyle}>
-                          <FavoriteButton
-                            active={favorites.includes(row.favoriteKey)}
-                            onClick={() => toggleFavorite(row.favoriteKey)}
-                          />
+                          <FavoriteButton active={favorites.includes(row.favoriteKey)} onClick={() => toggleFavorite(row.favoriteKey)} />
                         </td>
                         <td style={tdStyle}>{row.name}</td>
+                        <td style={tdStyle}>{row.dayStartText}</td>
                         <td style={tdStyle}>
-                          <InlinePrice
-                            value={row.priceEur}
-                            diffText={row.liveDiffTextEur}
-                            diffValue={row.liveDiffValueEur}
-                          />
+                          <InlinePrice value={row.priceEur} diffText={row.liveDiffTextEur} diffValue={row.liveDiffValueEur} />
                         </td>
                         <td style={tdStyle}>
-                          <InlinePrice
-                            value={row.priceTry}
-                            diffText={row.liveDiffTextTry}
-                            diffValue={row.liveDiffValueTry}
-                          />
+                          <InlinePrice value={row.priceTry} diffText={row.liveDiffTextTry} diffValue={row.liveDiffValueTry} />
                         </td>
                         <td style={tdStyle}>
                           <DayDiffCell text={row.dayDiffText} value={row.dayDiffValue} />
                         </td>
+                        <td style={tdStyle}>{row.buyPriceEur}</td>
+                        <td style={tdStyle}>{row.sellPriceEur}</td>
+                        <td style={tdStyle}>{row.spreadTextEur}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -1009,30 +1302,31 @@ export default function Home() {
                     <tr>
                       <th style={favoriteThStyle}>★</th>
                       <th style={thStyle}>Produkt</th>
+                      <th style={thStyle}>Tagesstart</th>
                       <th style={thStyle}>Preis inkl. Live-Differenz</th>
                       <th style={thStyle}>Änderung zum Vortag (EUR)</th>
+                      <th style={thStyle}>Ankauf</th>
+                      <th style={thStyle}>Verkauf</th>
+                      <th style={thStyle}>Spread</th>
                     </tr>
                   </thead>
                   <tbody>
                     {visibleMarketGeneral.map((row) => (
                       <tr key={row.id}>
                         <td style={favoriteTdStyle}>
-                          <FavoriteButton
-                            active={favorites.includes(row.favoriteKey)}
-                            onClick={() => toggleFavorite(row.favoriteKey)}
-                          />
+                          <FavoriteButton active={favorites.includes(row.favoriteKey)} onClick={() => toggleFavorite(row.favoriteKey)} />
                         </td>
                         <td style={tdStyle}>{row.name}</td>
+                        <td style={tdStyle}>{row.dayStartText}</td>
                         <td style={tdStyle}>
-                          <InlinePrice
-                            value={row.price}
-                            diffText={row.liveDiffText}
-                            diffValue={row.liveDiffValue}
-                          />
+                          <InlinePrice value={row.price} diffText={row.liveDiffText} diffValue={row.liveDiffValue} />
                         </td>
                         <td style={tdStyle}>
                           <DayDiffCell text={row.dayDiffText} value={row.dayDiffValue} />
                         </td>
+                        <td style={tdStyle}>{row.buyPrice}</td>
+                        <td style={tdStyle}>{row.sellPrice}</td>
+                        <td style={tdStyle}>{row.spreadText}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -1050,30 +1344,31 @@ export default function Home() {
                     <tr>
                       <th style={favoriteThStyle}>★</th>
                       <th style={thStyle}>Produkt</th>
+                      <th style={thStyle}>Tagesstart</th>
                       <th style={thStyle}>Preis inkl. Live-Differenz</th>
                       <th style={thStyle}>Änderung zum Vortag (EUR)</th>
+                      <th style={thStyle}>Ankauf</th>
+                      <th style={thStyle}>Verkauf</th>
+                      <th style={thStyle}>Spread</th>
                     </tr>
                   </thead>
                   <tbody>
                     {visibleMarketAustria.map((row) => (
                       <tr key={row.id}>
                         <td style={favoriteTdStyle}>
-                          <FavoriteButton
-                            active={favorites.includes(row.favoriteKey)}
-                            onClick={() => toggleFavorite(row.favoriteKey)}
-                          />
+                          <FavoriteButton active={favorites.includes(row.favoriteKey)} onClick={() => toggleFavorite(row.favoriteKey)} />
                         </td>
                         <td style={tdStyle}>{row.name}</td>
+                        <td style={tdStyle}>{row.dayStartText}</td>
                         <td style={tdStyle}>
-                          <InlinePrice
-                            value={row.price}
-                            diffText={row.liveDiffText}
-                            diffValue={row.liveDiffValue}
-                          />
+                          <InlinePrice value={row.price} diffText={row.liveDiffText} diffValue={row.liveDiffValue} />
                         </td>
                         <td style={tdStyle}>
                           <DayDiffCell text={row.dayDiffText} value={row.dayDiffValue} />
                         </td>
+                        <td style={tdStyle}>{row.buyPrice}</td>
+                        <td style={tdStyle}>{row.sellPrice}</td>
+                        <td style={tdStyle}>{row.spreadText}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -1091,38 +1386,35 @@ export default function Home() {
                     <tr>
                       <th style={favoriteThStyle}>★</th>
                       <th style={thStyle}>Produkt</th>
+                      <th style={thStyle}>Tagesstart</th>
                       <th style={thStyle}>Preis in Euro inkl. Live-Differenz</th>
                       <th style={thStyle}>Preis in Türkischer Lira inkl. Live-Differenz</th>
                       <th style={thStyle}>Änderung zum Vortag (EUR)</th>
+                      <th style={thStyle}>Ankauf (EUR)</th>
+                      <th style={thStyle}>Verkauf (EUR)</th>
+                      <th style={thStyle}>Spread (EUR)</th>
                     </tr>
                   </thead>
                   <tbody>
                     {visibleMarketTurkey.map((row) => (
                       <tr key={row.id}>
                         <td style={favoriteTdStyle}>
-                          <FavoriteButton
-                            active={favorites.includes(row.favoriteKey)}
-                            onClick={() => toggleFavorite(row.favoriteKey)}
-                          />
+                          <FavoriteButton active={favorites.includes(row.favoriteKey)} onClick={() => toggleFavorite(row.favoriteKey)} />
                         </td>
                         <td style={tdStyle}>{row.name}</td>
+                        <td style={tdStyle}>{row.dayStartText}</td>
                         <td style={tdStyle}>
-                          <InlinePrice
-                            value={row.priceEur}
-                            diffText={row.liveDiffTextEur}
-                            diffValue={row.liveDiffValueEur}
-                          />
+                          <InlinePrice value={row.priceEur} diffText={row.liveDiffTextEur} diffValue={row.liveDiffValueEur} />
                         </td>
                         <td style={tdStyle}>
-                          <InlinePrice
-                            value={row.priceTry}
-                            diffText={row.liveDiffTextTry}
-                            diffValue={row.liveDiffValueTry}
-                          />
+                          <InlinePrice value={row.priceTry} diffText={row.liveDiffTextTry} diffValue={row.liveDiffValueTry} />
                         </td>
                         <td style={tdStyle}>
                           <DayDiffCell text={row.dayDiffText} value={row.dayDiffValue} />
                         </td>
+                        <td style={tdStyle}>{row.buyPriceEur}</td>
+                        <td style={tdStyle}>{row.sellPriceEur}</td>
+                        <td style={tdStyle}>{row.spreadTextEur}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -1138,11 +1430,7 @@ export default function Home() {
           <div style={calculatorGridStyle}>
             <label style={labelStyle}>
               Produktvorlage
-              <select
-                value={calculatorPreset}
-                onChange={(event) => applyCalculatorPreset(event.target.value)}
-                style={selectStyle}
-              >
+              <select value={calculatorPreset} onChange={(event) => applyCalculatorPreset(event.target.value)} style={selectStyle}>
                 {CALCULATOR_PRESETS.map((preset) => (
                   <option key={preset.label} value={preset.label}>
                     {preset.label}
@@ -1153,11 +1441,7 @@ export default function Home() {
 
             <label style={labelStyle}>
               Modus
-              <select
-                value={calculatorMode}
-                onChange={(event) => setCalculatorMode(event.target.value as TabMode)}
-                style={selectStyle}
-              >
+              <select value={calculatorMode} onChange={(event) => setCalculatorMode(event.target.value as TabMode)} style={selectStyle}>
                 <option value="ref">Referenzpreis</option>
                 <option value="market">Marktpreis</option>
               </select>
@@ -1205,12 +1489,85 @@ export default function Home() {
           <div style={calculatorResultStyle}>
             {calculatorFormatted ? (
               <>
-                Geschätzter Wert: <strong>{calculatorFormatted}</strong>
+                <div>Geschätzter Wert: <strong>{calculatorFormatted}</strong></div>
+                <div>Modellierter Ankauf: <strong>{calculatorBuyFormatted}</strong></div>
+                <div>Modellierter Verkauf: <strong>{calculatorSellFormatted}</strong></div>
+                <div>Spread: <strong>{calculatorSpreadFormatted}</strong></div>
               </>
             ) : (
               <>Bitte ein gültiges Gewicht eingeben.</>
             )}
           </div>
+        </section>
+
+        <section style={cardStyle}>
+          <h2 style={sectionTitleStyle}>Preis-Alarm</h2>
+
+          <div style={calculatorGridStyle}>
+            <label style={labelStyle}>
+              Produkt
+              <select value={alertProduct} onChange={(event) => setAlertProduct(event.target.value)} style={selectStyle}>
+                <option value="">Bitte wählen</option>
+                {allRows.map((row) => (
+                  <option key={row.favoriteKey} value={row.name}>
+                    {row.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label style={labelStyle}>
+              Richtung
+              <select
+                value={alertDirection}
+                onChange={(event) => setAlertDirection(event.target.value as "below" | "above")}
+                style={selectStyle}
+              >
+                <option value="below">unter Preis</option>
+                <option value="above">über Preis</option>
+              </select>
+            </label>
+
+            <label style={labelStyle}>
+              Zielpreis in EUR
+              <input
+                value={alertTarget}
+                onChange={(event) => setAlertTarget(event.target.value)}
+                style={inputStyle}
+                placeholder="z. B. 100"
+              />
+            </label>
+
+            <div style={labelStyle}>
+              <span>Aktion</span>
+              <button type="button" onClick={createAlert} style={utilityButtonStyle}>
+                Alarm speichern
+              </button>
+            </div>
+          </div>
+
+          {alerts.length === 0 ? (
+            <EmptyState text="Noch keine Preis-Alarme gespeichert." />
+          ) : (
+            <div style={alertListStyle}>
+              {alerts.map((alert) => (
+                <div key={alert.id} style={alertCardStyle}>
+                  <div>
+                    <strong>{alert.productName}</strong>
+                    <div style={alertSubTextStyle}>
+                      {alert.direction === "below" ? "Alarm bei unter" : "Alarm bei über"} {alert.targetPrice.toFixed(2)} €
+                    </div>
+                    <div style={alertSubTextStyle}>
+                      Status: {alert.active ? "aktiv" : "ausgelöst"}
+                    </div>
+                  </div>
+                  <button type="button" onClick={() => removeAlert(alert.id)} style={removeAlertButtonStyle}>
+                    Entfernen
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
         </section>
 
         <section style={cardStyle}>
@@ -1271,6 +1628,28 @@ export default function Home() {
           ) : (
             <EmptyState text="Keine Verlaufsdaten verfügbar." />
           )}
+        </section>
+
+        <section style={trustInfoSectionStyle}>
+          <div style={trustInfoCardStyle}>
+            <strong>Transparenz</strong>
+            <p style={topInfoTextStyle}>
+              Tagesstart, Ankauf, Verkauf und Spread werden sichtbar ausgewiesen, damit Preisbewegungen
+              nachvollziehbarer bleiben.
+            </p>
+          </div>
+          <div style={trustInfoCardStyle}>
+            <strong>Historische Daten</strong>
+            <p style={topInfoTextStyle}>
+              Die Verlaufskarten basieren auf serverseitig gespeicherten Daten und nicht nur auf temporären Browserwerten.
+            </p>
+          </div>
+          <div style={trustInfoCardStyle}>
+            <strong>Suchlogik</strong>
+            <p style={topInfoTextStyle}>
+              Auch vereinfachte Schreibweisen wie ceyrek altin, armreif oder philharmoniker werden erkannt.
+            </p>
+          </div>
         </section>
 
         <p style={footerSourceStyle}>
@@ -1557,7 +1936,7 @@ const pageStyle: React.CSSProperties = {
 };
 
 const containerStyle: React.CSSProperties = {
-  maxWidth: "1180px",
+  maxWidth: "1240px",
   margin: "0 auto",
 };
 
@@ -1572,9 +1951,20 @@ const titleStyle: React.CSSProperties = {
 const introStyle: React.CSSProperties = {
   textAlign: "center",
   color: "#4b5563",
-  marginBottom: "24px",
+  marginBottom: "20px",
   fontSize: "16px",
   lineHeight: 1.6,
+};
+
+const trustBarStyle: React.CSSProperties = {
+  display: "flex",
+  justifyContent: "center",
+  gap: "12px",
+  flexWrap: "wrap",
+  marginBottom: "24px",
+  color: "#065f46",
+  fontSize: "13px",
+  fontWeight: 700,
 };
 
 const infoStyle: React.CSSProperties = {
@@ -1660,8 +2050,8 @@ const suggestionBoxStyle: React.CSSProperties = {
   position: "absolute",
   top: "86px",
   left: 0,
-  width: "280px",
-  maxWidth: "90vw",
+  width: "320px",
+  maxWidth: "92vw",
   backgroundColor: "#fff",
   border: "1px solid #e5e7eb",
   borderRadius: "14px",
@@ -1826,6 +2216,34 @@ const emptyStateStyle: React.CSSProperties = {
   fontWeight: 600,
 };
 
+const favoriteGridStyle: React.CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+  gap: "14px",
+};
+
+const favoriteCardStyle: React.CSSProperties = {
+  border: "1px solid #e5e7eb",
+  borderRadius: "14px",
+  padding: "14px",
+  backgroundColor: "#f9fafb",
+};
+
+const favoriteCardHeaderStyle: React.CSSProperties = {
+  display: "flex",
+  justifyContent: "space-between",
+  gap: "8px",
+  alignItems: "flex-start",
+  marginBottom: "10px",
+};
+
+const favoriteCardBodyStyle: React.CSSProperties = {
+  display: "grid",
+  gap: "6px",
+  fontSize: "14px",
+  color: "#374151",
+};
+
 const tabContainer: React.CSSProperties = {
   display: "flex",
   justifyContent: "center",
@@ -1869,6 +2287,42 @@ const calculatorResultStyle: React.CSSProperties = {
   padding: "16px 18px",
   fontSize: "16px",
   color: "#111827",
+  display: "grid",
+  gap: "6px",
+};
+
+const alertListStyle: React.CSSProperties = {
+  display: "grid",
+  gap: "12px",
+};
+
+const alertCardStyle: React.CSSProperties = {
+  border: "1px solid #e5e7eb",
+  borderRadius: "14px",
+  padding: "14px 16px",
+  display: "flex",
+  justifyContent: "space-between",
+  gap: "12px",
+  alignItems: "center",
+  flexWrap: "wrap",
+  backgroundColor: "#f9fafb",
+};
+
+const alertSubTextStyle: React.CSSProperties = {
+  fontSize: "13px",
+  color: "#6b7280",
+  marginTop: "4px",
+};
+
+const removeAlertButtonStyle: React.CSSProperties = {
+  border: "none",
+  borderRadius: "10px",
+  padding: "10px 12px",
+  backgroundColor: "#111827",
+  color: "#fff",
+  cursor: "pointer",
+  fontWeight: 700,
+  fontSize: "13px",
 };
 
 const historyToolbarStyle: React.CSSProperties = {
@@ -1926,6 +2380,23 @@ const historyStatsStyle: React.CSSProperties = {
   alignItems: "center",
 };
 
+const chartOuterStyle: React.CSSProperties = {
+  position: "relative",
+  overflowX: "auto",
+};
+
+const chartTooltipStyle: React.CSSProperties = {
+  position: "absolute",
+  top: "10px",
+  right: "10px",
+  backgroundColor: "#111827",
+  color: "#fff",
+  borderRadius: "10px",
+  padding: "10px 12px",
+  fontSize: "13px",
+  boxShadow: "0 8px 24px rgba(0,0,0,0.18)",
+};
+
 const historyLabelsStyle: React.CSSProperties = {
   display: "flex",
   justifyContent: "space-between",
@@ -1939,6 +2410,21 @@ const historyLabelItemStyle: React.CSSProperties = {
   color: "#6b7280",
   textAlign: "center",
   minWidth: "52px",
+};
+
+const trustInfoSectionStyle: React.CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))",
+  gap: "14px",
+  marginBottom: "24px",
+};
+
+const trustInfoCardStyle: React.CSSProperties = {
+  backgroundColor: "#ffffff",
+  borderRadius: "16px",
+  padding: "16px 18px",
+  boxShadow: "0 6px 18px rgba(0,0,0,0.06)",
+  color: "#1f2937",
 };
 
 const footerSourceStyle: React.CSSProperties = {
