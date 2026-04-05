@@ -4,7 +4,6 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 type Currency = "EUR" | "TRY";
-
 type ProductMode = "ref" | "market";
 
 type BaseRow = {
@@ -72,12 +71,25 @@ type FxLatestResponse = {
   };
 };
 
+type PricesResponse = {
+  refGeneral: SingleRow[];
+  refAustria: SingleRow[];
+  refTurkey: DualRow[];
+  marketGeneral: SingleRow[];
+  marketAustria: SingleRow[];
+  marketTurkey: DualRow[];
+  updatedAt: string;
+  statusText: string;
+};
+
 const redis = new Redis({
   url: process.env.KV_REST_API_URL!,
   token: process.env.KV_REST_API_TOKEN!,
 });
 
 const OUNCE_IN_GRAMS = 31.1034768;
+const SNAPSHOT_CACHE_SECONDS = 10;
+const RESPONSE_CACHE_SECONDS = 10;
 
 /**
  * Markt-Aufschläge für modellierte Verkaufspreise
@@ -120,53 +132,6 @@ const MARKET_PREMIUMS = {
     "Gold-Armreif 10 g (22 Ayar)": 1.082,
     "Gold-Armreif 15 g (22 Ayar)": 1.082,
     "Gold-Armreif 20 g (22 Ayar)": 1.082,
-  },
-} as const;
-
-/**
- * Modellierte Ankaufsfaktoren.
- * Verkauf = aktueller modellierter Preis
- * Ankauf = etwas darunter
- * Spread = Verkauf - Ankauf
- */
-const BUY_FACTORS = {
-  general: {
-    "Gold 1 g (24K Spotpreis)": 0.992,
-    "Gold 1 oz (24K Spotpreis)": 0.994,
-    "Goldbarren 1 g": 0.955,
-    "Goldbarren 5 g": 0.97,
-    "Goldbarren 10 g": 0.976,
-    "Goldbarren 50 g": 0.985,
-    "Goldbarren 100 g": 0.988,
-  },
-  austria: {
-    "Wiener Philharmoniker 1 oz": 0.978,
-    "Wiener Philharmoniker 1/2 oz": 0.972,
-    "Wiener Philharmoniker 1/4 oz": 0.968,
-    "Wiener Philharmoniker 1/10 oz": 0.956,
-    "Wiener Philharmoniker 1/25 oz": 0.938,
-    "Franz Joseph 1-fach Dukat (3,44 g fein)": 0.968,
-    "Franz Joseph 4-fach Dukat (13,77 g fein)": 0.978,
-    "10 Kronen Gold (3,05 g fein)": 0.965,
-    "20 Kronen Gold (6,10 g fein)": 0.972,
-    "100 Kronen Gold (30,49 g fein)": 0.983,
-    "Vier Gulden Gold (2,90 g fein)": 0.963,
-    "Acht Gulden Gold (5,81 g fein)": 0.971,
-  },
-  turkey24k: {
-    "Gram Altın (1 g)": 0.992,
-    "Çeyrek Altın (1,75 g)": 0.985,
-    "Yarım Altın (3,50 g)": 0.986,
-    "Tam Altın (7,00 g)": 0.987,
-    "Reşat Altın (7,20 g)": 0.984,
-    "Gremse Altın (17,50 g)": 0.986,
-    "Große Reşat Gold (36,00 g)": 0.984,
-  },
-  turkey22k: {
-    "Gold-Armreif 1 g (22 Ayar)": 0.972,
-    "Gold-Armreif 10 g (22 Ayar)": 0.974,
-    "Gold-Armreif 15 g (22 Ayar)": 0.975,
-    "Gold-Armreif 20 g (22 Ayar)": 0.976,
   },
 } as const;
 
@@ -284,7 +249,7 @@ async function fetchJson<T>(url: string): Promise<T> {
   return (await response.json()) as T;
 }
 
-async function buildSnapshot(): Promise<Snapshot> {
+async function fetchFreshSnapshot(): Promise<Snapshot> {
   const [gold, fx] = await Promise.all([
     fetchJson<GoldApiResponse>("https://api.gold-api.com/price/XAU"),
     fetchJson<FxLatestResponse>("https://api.frankfurter.dev/v1/latest?base=EUR&symbols=USD,TRY"),
@@ -348,6 +313,16 @@ async function buildSnapshot(): Promise<Snapshot> {
   return snapshot;
 }
 
+async function buildSnapshot(): Promise<Snapshot> {
+  const cacheKey = "gold:snapshot-cache:v1";
+  const cached = ((await redis.get(cacheKey)) as Snapshot | null) ?? null;
+  if (cached) return cached;
+
+  const snapshot = await fetchFreshSnapshot();
+  await redis.set(cacheKey, snapshot, { ex: SNAPSHOT_CACHE_SECONDS });
+  return snapshot;
+}
+
 async function appendIntradayHistory(dayKey: string, chartKey: string, value: number) {
   const entry = JSON.stringify({
     t: Date.now(),
@@ -355,24 +330,37 @@ async function appendIntradayHistory(dayKey: string, chartKey: string, value: nu
   });
 
   const redisKey = `gold:intraday:${dayKey}:${chartKey}`;
-  await redis.rpush(redisKey, entry);
-  await redis.ltrim(redisKey, -8000, -1);
+
+  await Promise.all([redis.rpush(redisKey, entry), redis.ltrim(redisKey, -8000, -1)]);
 }
 
-function getBuyFactorForGeneral(name: string) {
-  return BUY_FACTORS.general[name as keyof typeof BUY_FACTORS.general] ?? 0.98;
+function getTypeFromName(name: string) {
+  const isJewelry =
+    name.includes("Armreif") ||
+    name.includes("Dukat") ||
+    name.includes("Kronen") ||
+    name.includes("Gulden");
+
+  return { isJewelry };
 }
 
-function getBuyFactorForAustria(name: string) {
-  return BUY_FACTORS.austria[name as keyof typeof BUY_FACTORS.austria] ?? 0.975;
-}
+function getBuyAndSellValues(currentValue: number, name: string) {
+  const { isJewelry } = getTypeFromName(name);
 
-function getBuyFactorForTurkey24(name: string) {
-  return BUY_FACTORS.turkey24k[name as keyof typeof BUY_FACTORS.turkey24k] ?? 0.985;
-}
+  // Verkaufspreis wieder wie früher = aktueller Preis
+  const sellValue = currentValue;
 
-function getBuyFactorForTurkey22(name: string) {
-  return BUY_FACTORS.turkey22k[name as keyof typeof BUY_FACTORS.turkey22k] ?? 0.975;
+  // Ankauf realistisch niedriger
+  const buyDiscount = isJewelry ? 0.10 : 0.03;
+  const buyValue = currentValue * (1 - buyDiscount);
+
+  const differenceValue = sellValue - buyValue;
+
+  return {
+    buyValue,
+    sellValue,
+    differenceValue,
+  };
 }
 
 function buildSingleRow(
@@ -381,15 +369,12 @@ function buildSingleRow(
   name: string,
   currentValue: number,
   previousLiveValue: number | null,
-  dayStartValue: number | null,
-  buyFactor: number
+  dayStartValue: number | null
 ): SingleRow {
   const liveDiff = calcAbsoluteDiff(currentValue, previousLiveValue);
   const dayDiff = calcAbsoluteDiff(currentValue, dayStartValue);
 
-  const buyValue = currentValue * buyFactor;
-  const sellValue = currentValue;
-  const spreadValue = sellValue - buyValue;
+  const { buyValue, sellValue, differenceValue } = getBuyAndSellValues(currentValue, name);
 
   return {
     id: `${prefix}-${name}`,
@@ -408,8 +393,8 @@ function buildSingleRow(
     buyPriceValue: buyValue,
     sellPrice: formatCurrency(sellValue, "EUR"),
     sellPriceValue: sellValue,
-    spreadText: formatCurrency(spreadValue, "EUR"),
-    spreadValue,
+    spreadText: formatCurrency(differenceValue, "EUR"),
+    spreadValue: differenceValue,
   };
 }
 
@@ -421,16 +406,13 @@ function buildDualRow(
   currentTry: number,
   previousLiveEur: number | null,
   previousLiveTry: number | null,
-  dayStartEur: number | null,
-  buyFactor: number
+  dayStartEur: number | null
 ): DualRow {
   const liveDiffEur = calcAbsoluteDiff(currentEur, previousLiveEur);
   const liveDiffTry = calcAbsoluteDiff(currentTry, previousLiveTry);
   const dayDiff = calcAbsoluteDiff(currentEur, dayStartEur);
 
-  const buyPriceEurValue = currentEur * buyFactor;
-  const sellPriceEurValue = currentEur;
-  const spreadValueEur = sellPriceEurValue - buyPriceEurValue;
+  const { buyValue, sellValue, differenceValue } = getBuyAndSellValues(currentEur, name);
 
   return {
     id: `${prefix}-${name}`,
@@ -449,20 +431,16 @@ function buildDualRow(
     liveDiffValueTry: liveDiffTry,
     dayDiffText: formatAbsoluteDiff(dayDiff, "EUR"),
     dayDiffValue: dayDiff,
-    buyPriceEur: formatCurrency(buyPriceEurValue, "EUR"),
-    buyPriceEurValue,
-    sellPriceEur: formatCurrency(sellPriceEurValue, "EUR"),
-    sellPriceEurValue,
-    spreadTextEur: formatCurrency(spreadValueEur, "EUR"),
-    spreadValueEur,
+    buyPriceEur: formatCurrency(buyValue, "EUR"),
+    buyPriceEurValue: buyValue,
+    sellPriceEur: formatCurrency(sellValue, "EUR"),
+    sellPriceEurValue: sellValue,
+    spreadTextEur: formatCurrency(differenceValue, "EUR"),
+    spreadValueEur: differenceValue,
   };
 }
 
-function buildRows(
-  current: Snapshot,
-  previousLive: Snapshot,
-  dayBaseline: Snapshot
-) {
+function buildRows(current: Snapshot, previousLive: Snapshot, dayBaseline: Snapshot) {
   const refGeneral: SingleRow[] = GENERAL_ITEMS.map((item) =>
     buildSingleRow(
       "refGeneral",
@@ -470,8 +448,7 @@ function buildRows(
       item.name,
       current.refGeneral[item.name],
       previousLive.refGeneral[item.name] ?? null,
-      dayBaseline.refGeneral[item.name] ?? null,
-      getBuyFactorForGeneral(item.name)
+      dayBaseline.refGeneral[item.name] ?? null
     )
   );
 
@@ -482,8 +459,7 @@ function buildRows(
       item.name,
       current.refAustria[item.name],
       previousLive.refAustria[item.name] ?? null,
-      dayBaseline.refAustria[item.name] ?? null,
-      getBuyFactorForAustria(item.name)
+      dayBaseline.refAustria[item.name] ?? null
     )
   );
 
@@ -496,8 +472,7 @@ function buildRows(
       current.refTurkeyTry[item.name],
       previousLive.refTurkeyEur[item.name] ?? null,
       previousLive.refTurkeyTry[item.name] ?? null,
-      dayBaseline.refTurkeyEur[item.name] ?? null,
-      item.karat === 22 ? getBuyFactorForTurkey22(item.name) : getBuyFactorForTurkey24(item.name)
+      dayBaseline.refTurkeyEur[item.name] ?? null
     )
   );
 
@@ -508,8 +483,7 @@ function buildRows(
       item.name,
       current.marketGeneral[item.name],
       previousLive.marketGeneral[item.name] ?? null,
-      dayBaseline.marketGeneral[item.name] ?? null,
-      getBuyFactorForGeneral(item.name)
+      dayBaseline.marketGeneral[item.name] ?? null
     )
   );
 
@@ -520,8 +494,7 @@ function buildRows(
       item.name,
       current.marketAustria[item.name],
       previousLive.marketAustria[item.name] ?? null,
-      dayBaseline.marketAustria[item.name] ?? null,
-      getBuyFactorForAustria(item.name)
+      dayBaseline.marketAustria[item.name] ?? null
     )
   );
 
@@ -534,8 +507,7 @@ function buildRows(
       current.marketTurkeyTry[item.name],
       previousLive.marketTurkeyEur[item.name] ?? null,
       previousLive.marketTurkeyTry[item.name] ?? null,
-      dayBaseline.marketTurkeyEur[item.name] ?? null,
-      item.karat === 22 ? getBuyFactorForTurkey22(item.name) : getBuyFactorForTurkey24(item.name)
+      dayBaseline.marketTurkeyEur[item.name] ?? null
     )
   );
 
@@ -553,40 +525,29 @@ export async function GET() {
   try {
     const dayKey = getViennaDayKey();
     const yesterdayKey = getYesterdayKey();
+    const responseCacheKey = `gold:response-cache:${dayKey}`;
+
+    const cachedResponse = ((await redis.get(responseCacheKey)) as PricesResponse | null) ?? null;
+    if (cachedResponse) {
+      return Response.json(cachedResponse);
+    }
 
     const currentSnapshot = await buildSnapshot();
 
-    const previousLive =
-      ((await redis.get(`gold:latest:${dayKey}`)) as Snapshot | null) ??
-      createEmptySnapshot();
+    const [previousLiveRaw, dayBaselineRaw] = await Promise.all([
+      redis.get(`gold:latest:${dayKey}`),
+      redis.get(`gold:baseline:${dayKey}`),
+    ]);
 
-    let dayBaseline =
-      ((await redis.get(`gold:baseline:${dayKey}`)) as Snapshot | null) ?? null;
+    const previousLive = (previousLiveRaw as Snapshot | null) ?? createEmptySnapshot();
+
+    let dayBaseline = (dayBaselineRaw as Snapshot | null) ?? null;
 
     if (!dayBaseline) {
       dayBaseline =
-        ((await redis.get(`gold:close:${yesterdayKey}`)) as Snapshot | null) ??
-        currentSnapshot;
+        ((await redis.get(`gold:close:${yesterdayKey}`)) as Snapshot | null) ?? currentSnapshot;
 
       await redis.set(`gold:baseline:${dayKey}`, dayBaseline);
-    }
-
-    await redis.set(`gold:latest:${dayKey}`, currentSnapshot);
-    await redis.set(`gold:close:${dayKey}`, currentSnapshot);
-
-    for (const item of GENERAL_ITEMS) {
-      await appendIntradayHistory(dayKey, `ref::${item.name}`, currentSnapshot.refGeneral[item.name]);
-      await appendIntradayHistory(dayKey, `market::${item.name}`, currentSnapshot.marketGeneral[item.name]);
-    }
-
-    for (const item of AUSTRIA_ITEMS) {
-      await appendIntradayHistory(dayKey, `ref::${item.name}`, currentSnapshot.refAustria[item.name]);
-      await appendIntradayHistory(dayKey, `market::${item.name}`, currentSnapshot.marketAustria[item.name]);
-    }
-
-    for (const item of TURKEY_ITEMS) {
-      await appendIntradayHistory(dayKey, `ref::${item.name}`, currentSnapshot.refTurkeyEur[item.name]);
-      await appendIntradayHistory(dayKey, `market::${item.name}`, currentSnapshot.marketTurkeyEur[item.name]);
     }
 
     const rows = buildRows(currentSnapshot, previousLive, dayBaseline);
@@ -601,11 +562,48 @@ export async function GET() {
       second: "2-digit",
     });
 
-    return Response.json({
+    const responsePayload: PricesResponse = {
       ...rows,
       updatedAt,
       statusText: "Serverdaten erfolgreich aktualisiert.",
-    });
+    };
+
+    const writePromises: Promise<unknown>[] = [
+      redis.set(`gold:latest:${dayKey}`, currentSnapshot),
+      redis.set(`gold:close:${dayKey}`, currentSnapshot),
+      redis.set(responseCacheKey, responsePayload, { ex: RESPONSE_CACHE_SECONDS }),
+    ];
+
+    for (const item of GENERAL_ITEMS) {
+      writePromises.push(
+        appendIntradayHistory(dayKey, `ref::${item.name}`, currentSnapshot.refGeneral[item.name])
+      );
+      writePromises.push(
+        appendIntradayHistory(dayKey, `market::${item.name}`, currentSnapshot.marketGeneral[item.name])
+      );
+    }
+
+    for (const item of AUSTRIA_ITEMS) {
+      writePromises.push(
+        appendIntradayHistory(dayKey, `ref::${item.name}`, currentSnapshot.refAustria[item.name])
+      );
+      writePromises.push(
+        appendIntradayHistory(dayKey, `market::${item.name}`, currentSnapshot.marketAustria[item.name])
+      );
+    }
+
+    for (const item of TURKEY_ITEMS) {
+      writePromises.push(
+        appendIntradayHistory(dayKey, `ref::${item.name}`, currentSnapshot.refTurkeyEur[item.name])
+      );
+      writePromises.push(
+        appendIntradayHistory(dayKey, `market::${item.name}`, currentSnapshot.marketTurkeyEur[item.name])
+      );
+    }
+
+    await Promise.all(writePromises);
+
+    return Response.json(responsePayload);
   } catch (error) {
     console.error("api/prices Fehler:", error);
 

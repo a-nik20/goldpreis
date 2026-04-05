@@ -21,6 +21,14 @@ type IntradayEntry = {
   v: number;
 };
 
+type HistoryResponse = {
+  chartKey: string;
+  range: ChartRange;
+  title: string;
+  currency: "EUR";
+  points: Array<{ label: string; value: number }>;
+};
+
 const redis = new Redis({
   url: process.env.KV_REST_API_URL!,
   token: process.env.KV_REST_API_TOKEN!,
@@ -45,37 +53,20 @@ function getViennaDayKey(date = new Date()) {
   return `${year}-${month}-${day}`;
 }
 
-function getCurrentWeekDates() {
+function getLastDayKeys(count: number) {
   const now = getViennaNow();
-  const day = now.getDay();
-  const mondayOffset = day === 0 ? -6 : 1 - day;
-
-  const monday = new Date(now);
-  monday.setDate(now.getDate() + mondayOffset);
-
   const dates: Date[] = [];
-  for (let i = 0; i < 7; i++) {
-    const date = new Date(monday);
-    date.setDate(monday.getDate() + i);
+
+  for (let offset = count - 1; offset >= 0; offset--) {
+    const date = new Date(now);
+    date.setDate(now.getDate() - offset);
     dates.push(date);
   }
 
-  return dates;
-}
-
-function getCurrentMonthDates() {
-  const now = getViennaNow();
-  const year = now.getFullYear();
-  const month = now.getMonth();
-
-  const lastDay = new Date(year, month + 1, 0).getDate();
-  const dates: Date[] = [];
-
-  for (let day = 1; day <= lastDay; day++) {
-    dates.push(new Date(year, month, day));
-  }
-
-  return dates;
+  return dates.map((date) => ({
+    key: getViennaDayKey(date),
+    date,
+  }));
 }
 
 function formatIntradayLabel(timestamp: number) {
@@ -90,6 +81,8 @@ function formatWeekLabel(date: Date) {
   return new Intl.DateTimeFormat("de-AT", {
     timeZone: "Europe/Vienna",
     weekday: "short",
+    day: "2-digit",
+    month: "2-digit",
   }).format(date);
 }
 
@@ -160,6 +153,14 @@ function cleanTitle(chartKey: string) {
   return chartKey.replace(/^ref::/, "").replace(/^market::/, "");
 }
 
+async function getCachedHistory(cacheKey: string) {
+  return ((await redis.get(cacheKey)) as HistoryResponse | null) ?? null;
+}
+
+async function setCachedHistory(cacheKey: string, data: HistoryResponse, ttlSeconds: number) {
+  await redis.set(cacheKey, data, { ex: ttlSeconds });
+}
+
 export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
@@ -167,90 +168,119 @@ export async function GET(request: Request) {
     const range = (searchParams.get("range") || "day") as ChartRange;
 
     if (!chartKey) {
-      return Response.json(
-        { error: "chartKey fehlt." },
-        { status: 400 }
-      );
+      return Response.json({ error: "chartKey fehlt." }, { status: 400 });
+    }
+
+    const todayKey = getViennaDayKey();
+    const cacheKey = `gold:history-cache:${todayKey}:${range}:${chartKey}`;
+    const cacheTtl = range === "day" ? 15 : 120;
+
+    const cached = await getCachedHistory(cacheKey);
+    if (cached) {
+      return Response.json(cached);
     }
 
     if (range === "day") {
-      const dayKey = getViennaDayKey();
-      const redisKey = `gold:intraday:${dayKey}:${chartKey}`;
-      const rawEntries = (await redis.lrange(redisKey, 0, -1)) as unknown[] | null;
+      const nowMs = Date.now();
+      const fromMs = nowMs - 24 * 60 * 60 * 1000;
 
-      const points = (rawEntries ?? [])
+      const today = getViennaNow();
+      const yesterday = new Date(today);
+      yesterday.setDate(today.getDate() - 1);
+
+      const todayKeyLocal = getViennaDayKey(today);
+      const yesterdayKey = getViennaDayKey(yesterday);
+
+      const [rawYesterday, rawToday] = await Promise.all([
+        redis.lrange(`gold:intraday:${yesterdayKey}:${chartKey}`, 0, -1),
+        redis.lrange(`gold:intraday:${todayKeyLocal}:${chartKey}`, 0, -1),
+      ]);
+
+      const points = [...(rawYesterday ?? []), ...(rawToday ?? [])]
         .map(parseIntradayEntry)
         .filter((item): item is IntradayEntry => item !== null)
+        .filter((entry) => entry.t >= fromMs)
+        .sort((a, b) => a.t - b.t)
         .map((entry) => ({
           label: formatIntradayLabel(entry.t),
           value: entry.v,
         }));
 
-      return Response.json({
+      const result: HistoryResponse = {
         chartKey,
         range,
-        title: `${cleanTitle(chartKey)} – Tagesansicht`,
+        title: `${cleanTitle(chartKey)} – Letzte 24 Stunden`,
         currency: "EUR",
         points,
-      });
+      };
+
+      await setCachedHistory(cacheKey, result, cacheTtl);
+      return Response.json(result);
     }
 
     if (range === "week") {
-      const dates = getCurrentWeekDates();
-      const points: Array<{ label: string; value: number }> = [];
+      const days = getLastDayKeys(7);
 
-      for (const date of dates) {
-        const dayKey = getViennaDayKey(date);
-        const snapshot =
-          ((await redis.get(`gold:close:${dayKey}`)) as Snapshot | null) ?? null;
+      const snapshots = await Promise.all(
+        days.map(({ key }) => redis.get(`gold:close:${key}`))
+      );
 
-        const value = resolveSnapshotValue(snapshot, chartKey);
-        if (value !== null) {
-          points.push({
+      const points = days
+        .map(({ date }, index) => {
+          const snapshot = (snapshots[index] as Snapshot | null) ?? null;
+          const value = resolveSnapshotValue(snapshot, chartKey);
+
+          if (value === null) return null;
+
+          return {
             label: formatWeekLabel(date),
             value,
-          });
-        } else {
-          points.push({
-            label: formatWeekLabel(date),
-            value: NaN,
-          });
-        }
-      }
+          };
+        })
+        .filter((item): item is { label: string; value: number } => item !== null);
 
-      return Response.json({
+      const result: HistoryResponse = {
         chartKey,
         range,
-        title: `${cleanTitle(chartKey)} – Kalenderwoche (Mo–So)`,
+        title: `${cleanTitle(chartKey)} – Letzte 7 Tage`,
         currency: "EUR",
-        points: points.filter((point) => !Number.isNaN(point.value)),
-      });
+        points,
+      };
+
+      await setCachedHistory(cacheKey, result, cacheTtl);
+      return Response.json(result);
     }
 
-    const dates = getCurrentMonthDates();
-    const points: Array<{ label: string; value: number }> = [];
+    const days = getLastDayKeys(30);
 
-    for (const date of dates) {
-      const dayKey = getViennaDayKey(date);
-      const snapshot =
-        ((await redis.get(`gold:close:${dayKey}`)) as Snapshot | null) ?? null;
+    const snapshots = await Promise.all(
+      days.map(({ key }) => redis.get(`gold:close:${key}`))
+    );
 
-      const value = resolveSnapshotValue(snapshot, chartKey);
-      if (value !== null) {
-        points.push({
+    const points = days
+      .map(({ date }, index) => {
+        const snapshot = (snapshots[index] as Snapshot | null) ?? null;
+        const value = resolveSnapshotValue(snapshot, chartKey);
+
+        if (value === null) return null;
+
+        return {
           label: formatMonthLabel(date),
           value,
-        });
-      }
-    }
+        };
+      })
+      .filter((item): item is { label: string; value: number } => item !== null);
 
-    return Response.json({
+    const result: HistoryResponse = {
       chartKey,
       range,
-      title: `${cleanTitle(chartKey)} – Kalendermonat`,
+      title: `${cleanTitle(chartKey)} – Letzte 30 Tage`,
       currency: "EUR",
       points,
-    });
+    };
+
+    await setCachedHistory(cacheKey, result, cacheTtl);
+    return Response.json(result);
   } catch (error) {
     console.error("api/history Fehler:", error);
 

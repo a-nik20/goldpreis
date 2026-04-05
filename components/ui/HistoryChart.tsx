@@ -68,6 +68,18 @@ export default function HistoryChart({
 
   const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
 
+  const minPoint =
+    chartPoints.length > 0
+      ? chartPoints.reduce((prev, curr) => (curr.value < prev.value ? curr : prev))
+      : null;
+
+  const maxPoint =
+    chartPoints.length > 0
+      ? chartPoints.reduce((prev, curr) => (curr.value > prev.value ? curr : prev))
+      : null;
+
+  const lastPoint = chartPoints.length > 0 ? chartPoints[chartPoints.length - 1] : null;
+
   return (
     <div style={historyWrapStyle}>
       <div style={historyHeaderStyle}>
@@ -109,6 +121,7 @@ export default function HistoryChart({
             >
               <line x1="28" y1="28" x2="28" y2="252" stroke="#d1d5db" strokeWidth="1" />
               <line x1="28" y1="252" x2="892" y2="252" stroke="#d1d5db" strokeWidth="1" />
+
               <path
                 d={path}
                 fill="none"
@@ -116,6 +129,36 @@ export default function HistoryChart({
                 strokeWidth="3.5"
                 strokeLinecap="round"
               />
+
+              {minPoint && (
+                <circle
+                  cx={minPoint.x}
+                  cy={minPoint.y}
+                  r={5}
+                  fill="#dc2626"
+                  opacity={0.85}
+                />
+              )}
+
+              {maxPoint && (
+                <circle
+                  cx={maxPoint.x}
+                  cy={maxPoint.y}
+                  r={5}
+                  fill="#16a34a"
+                  opacity={0.85}
+                />
+              )}
+
+              {lastPoint && (
+                <circle
+                  cx={lastPoint.x}
+                  cy={lastPoint.y}
+                  r={7}
+                  fill="#111827"
+                  opacity={0.95}
+                />
+              )}
 
               {chartPoints.map((point, index) => (
                 <g key={`${point.label}-${index}`}>
@@ -126,6 +169,7 @@ export default function HistoryChart({
                     fill={hoveredIndex === index ? "#111827" : "#374151"}
                     onMouseEnter={() => setHoveredIndex(index)}
                     onMouseLeave={() => setHoveredIndex(null)}
+                    style={{ cursor: "pointer" }}
                   />
                 </g>
               ))}

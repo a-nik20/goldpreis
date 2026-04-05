@@ -24,6 +24,8 @@ export default function SearchToolbar({
   onlyFavorites,
   setOnlyFavorites,
   onRefresh,
+  favoritesFirst,
+  setFavoritesFirst,
 }: {
   searchBoxRef: React.RefObject<HTMLDivElement | null>;
   query: string;
@@ -36,6 +38,8 @@ export default function SearchToolbar({
   onlyFavorites: boolean;
   setOnlyFavorites: React.Dispatch<React.SetStateAction<boolean>>;
   onRefresh: () => void;
+  favoritesFirst: boolean;
+  setFavoritesFirst: React.Dispatch<React.SetStateAction<boolean>>;
 }) {
   return (
     <div style={toolbarStyle}>
@@ -98,6 +102,17 @@ export default function SearchToolbar({
           }}
         >
           {onlyFavorites ? "Nur Favoriten: AN" : "Nur Favoriten"}
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setFavoritesFirst((prev) => !prev)}
+          style={{
+            ...utilityButtonStyle,
+            ...(favoritesFirst ? utilityButtonActiveStyle : {}),
+          }}
+        >
+          {favoritesFirst ? "Favoriten zuerst: AN" : "Favoriten zuerst"}
         </button>
 
         <button type="button" onClick={onRefresh} style={utilityButtonStyle}>

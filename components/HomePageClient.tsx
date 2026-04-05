@@ -11,8 +11,17 @@ import SearchToolbar from "@/components/sections/SearchToolbar";
 import TrustInfoSection from "@/components/sections/TrustInfoSection";
 import LegalTabs from "@/components/tabs/LegalTabs";
 import MainTabs from "@/components/tabs/MainTabs";
-import { ALERTS_KEY, CALCULATOR_PRESETS, FAVORITES_KEY, REFRESH_INTERVAL_MS } from "@/lib/gold/constants";
-import { normalizeSearchText, buildSearchAliases } from "@/lib/gold/search";
+import {
+  ALERTS_KEY,
+  CALCULATOR_PRESETS,
+  FAVORITES_KEY,
+  REFRESH_INTERVAL_MS,
+} from "@/lib/gold/constants";
+import {
+  getRankedSuggestions,
+  matchesSmartSearch,
+  normalizeSearchText,
+} from "@/lib/gold/search";
 import {
   containerStyle,
   errorBoxStyle,
@@ -36,6 +45,7 @@ import type {
   AlertItem,
   ChartRange,
   DualRow,
+  GoldKarat,
   HistoryResponse,
   LegalTab,
   PricesResponse,
@@ -43,6 +53,18 @@ import type {
   SortKey,
   TabMode,
 } from "@/lib/gold/types";
+
+function detectMobileView() {
+  if (typeof window === "undefined") return false;
+
+  const byWidth = window.innerWidth <= 860;
+  const byUserAgent =
+    /android|iphone|ipad|ipod|mobile|windows phone|opera mini|blackberry/i.test(
+      navigator.userAgent
+    );
+
+  return byWidth || byUserAgent;
+}
 
 export default function HomePageClient() {
   const [activeTab, setActiveTab] = useState<TabMode>("ref");
@@ -64,6 +86,7 @@ export default function HomePageClient() {
   const [query, setQuery] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("default");
   const [onlyFavorites, setOnlyFavorites] = useState(false);
+  const [favoritesFirst, setFavoritesFirst] = useState(true);
   const [favorites, setFavorites] = useState<string[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
 
@@ -71,9 +94,10 @@ export default function HomePageClient() {
   const [selectedChartKey, setSelectedChartKey] = useState("");
   const [historyData, setHistoryData] = useState<HistoryResponse | null>(null);
   const [historyLoading, setHistoryLoading] = useState(false);
+  const [showOnlyFavoriteCharts, setShowOnlyFavoriteCharts] = useState(false);
 
   const [calculatorMode, setCalculatorMode] = useState<TabMode>("ref");
-  const [calculatorKarat, setCalculatorKarat] = useState<22 | 24>(24);
+  const [calculatorKarat, setCalculatorKarat] = useState<GoldKarat>(24);
   const [calculatorWeight, setCalculatorWeight] = useState("10");
   const [calculatorCurrency, setCalculatorCurrency] = useState<"EUR" | "TRY">("EUR");
   const [calculatorPreset, setCalculatorPreset] = useState("Keine Vorlage");
@@ -82,6 +106,9 @@ export default function HomePageClient() {
   const [alertProduct, setAlertProduct] = useState("");
   const [alertTarget, setAlertTarget] = useState("");
   const [alertDirection, setAlertDirection] = useState<"below" | "above">("below");
+
+  const [viewMode, setViewMode] = useState<"auto" | "desktop" | "mobile">("auto");
+  const [autoMobileDetected, setAutoMobileDetected] = useState(false);
 
   const searchBoxRef = useRef<HTMLDivElement | null>(null);
 
@@ -106,6 +133,17 @@ export default function HomePageClient() {
   }, []);
 
   useEffect(() => {
+    function updateDetectedMode() {
+      setAutoMobileDetected(detectMobileView());
+    }
+
+    updateDetectedMode();
+    window.addEventListener("resize", updateDetectedMode);
+
+    return () => window.removeEventListener("resize", updateDetectedMode);
+  }, []);
+
+  useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
       if (!searchBoxRef.current) return;
       if (!searchBoxRef.current.contains(event.target as Node)) {
@@ -116,6 +154,9 @@ export default function HomePageClient() {
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
+
+  const effectiveViewMode =
+    viewMode === "auto" ? (autoMobileDetected ? "mobile" : "desktop") : viewMode;
 
   function persistFavorites(next: string[]) {
     setFavorites(next);
@@ -208,64 +249,69 @@ export default function HomePageClient() {
     return Array.from(unique.values()).sort((a, b) => a.localeCompare(b, "de"));
   }, [allRows]);
 
-  const normalizedQuery = normalizeSearchText(query);
-
   const suggestions = useMemo(() => {
-    if (!normalizedQuery) return [];
+    return getRankedSuggestions(suggestionNames, query, 8);
+  }, [suggestionNames, query]);
 
-    return suggestionNames
-      .filter((name) => {
-        const aliases = buildSearchAliases(name);
-        return aliases.some((alias) => alias.includes(normalizedQuery));
-      })
-      .slice(0, 8);
-  }, [suggestionNames, normalizedQuery]);
+  function sortWithFavoritePriority<T extends SingleRow | DualRow>(
+    rows: T[],
+    comparator?: (a: T, b: T) => number
+  ) {
+    const copy = [...rows];
 
-  function matchesSmartSearch(name: string) {
-    if (!normalizedQuery) return true;
-    const aliases = buildSearchAliases(name);
-    return aliases.some((alias) => alias.includes(normalizedQuery));
+    copy.sort((a, b) => {
+      if (favoritesFirst) {
+        const aFav = favorites.includes(a.favoriteKey) ? 1 : 0;
+        const bFav = favorites.includes(b.favoriteKey) ? 1 : 0;
+        if (aFav !== bFav) return bFav - aFav;
+      }
+
+      if (comparator) return comparator(a, b);
+      return 0;
+    });
+
+    return copy;
   }
 
   function filterAndSortSingle(rows: SingleRow[]) {
     const filtered = rows.filter((row) => {
-      const matchesSearch = matchesSmartSearch(row.name);
+      const matchesSearch = matchesSmartSearch(row.name, query);
       const matchesFavorites = onlyFavorites ? favorites.includes(row.favoriteKey) : true;
       return matchesSearch && matchesFavorites;
     });
 
     switch (sortKey) {
       case "name-asc":
-        return [...filtered].sort((a, b) => a.name.localeCompare(b.name, "de"));
+        return sortWithFavoritePriority(filtered, (a, b) => a.name.localeCompare(b.name, "de"));
       case "name-desc":
-        return [...filtered].sort((a, b) => b.name.localeCompare(a.name, "de"));
+        return sortWithFavoritePriority(filtered, (a, b) => b.name.localeCompare(a.name, "de"));
       case "price-asc":
-        return [...filtered].sort((a, b) => a.priceValue - b.priceValue);
+        return sortWithFavoritePriority(filtered, (a, b) => a.priceValue - b.priceValue);
       case "price-desc":
-        return [...filtered].sort((a, b) => b.priceValue - a.priceValue);
+        return sortWithFavoritePriority(filtered, (a, b) => b.priceValue - a.priceValue);
       default:
-        return filtered;
+        return sortWithFavoritePriority(filtered);
     }
   }
 
   function filterAndSortDual(rows: DualRow[]) {
     const filtered = rows.filter((row) => {
-      const matchesSearch = matchesSmartSearch(row.name);
+      const matchesSearch = matchesSmartSearch(row.name, query);
       const matchesFavorites = onlyFavorites ? favorites.includes(row.favoriteKey) : true;
       return matchesSearch && matchesFavorites;
     });
 
     switch (sortKey) {
       case "name-asc":
-        return [...filtered].sort((a, b) => a.name.localeCompare(b.name, "de"));
+        return sortWithFavoritePriority(filtered, (a, b) => a.name.localeCompare(b.name, "de"));
       case "name-desc":
-        return [...filtered].sort((a, b) => b.name.localeCompare(a.name, "de"));
+        return sortWithFavoritePriority(filtered, (a, b) => b.name.localeCompare(a.name, "de"));
       case "price-asc":
-        return [...filtered].sort((a, b) => a.priceEurValue - b.priceEurValue);
+        return sortWithFavoritePriority(filtered, (a, b) => a.priceEurValue - b.priceEurValue);
       case "price-desc":
-        return [...filtered].sort((a, b) => b.priceEurValue - a.priceEurValue);
+        return sortWithFavoritePriority(filtered, (a, b) => b.priceEurValue - a.priceEurValue);
       default:
-        return filtered;
+        return sortWithFavoritePriority(filtered);
     }
   }
 
@@ -296,16 +342,36 @@ export default function HomePageClient() {
     visibleMarketTurkey,
   ]);
 
+  const favoriteChartKeys = useMemo(() => {
+    return allRows
+      .filter((row) => favorites.includes(row.favoriteKey))
+      .map((row) => row.chartKey);
+  }, [allRows, favorites]);
+
   useEffect(() => {
-    if (!chartOptions.length) return;
-    if (!selectedChartKey || !chartOptions.some((item) => item.key === selectedChartKey)) {
-      setSelectedChartKey(chartOptions[0].key);
+    const visibleChartOptions = showOnlyFavoriteCharts
+      ? chartOptions.filter((option) => favoriteChartKeys.includes(option.key))
+      : chartOptions;
+
+    if (!visibleChartOptions.length) {
+      setSelectedChartKey("");
+      return;
     }
-  }, [chartOptions, selectedChartKey]);
+
+    if (
+      !selectedChartKey ||
+      !visibleChartOptions.some((item) => item.key === selectedChartKey)
+    ) {
+      setSelectedChartKey(visibleChartOptions[0].key);
+    }
+  }, [chartOptions, favoriteChartKeys, selectedChartKey, showOnlyFavoriteCharts]);
 
   useEffect(() => {
     async function loadHistory() {
-      if (!selectedChartKey) return;
+      if (!selectedChartKey) {
+        setHistoryData(null);
+        return;
+      }
 
       try {
         setHistoryLoading(true);
@@ -332,45 +398,6 @@ export default function HomePageClient() {
     loadHistory();
   }, [selectedChartKey, chartRange]);
 
-  useEffect(() => {
-    if (!("Notification" in window)) return;
-
-    const productMap = new Map<string, number>();
-
-    for (const row of allRows) {
-      if ("priceValue" in row) {
-        productMap.set(row.name, row.priceValue);
-      } else {
-        productMap.set(row.name, row.priceEurValue);
-      }
-    }
-
-    const updatedAlerts = alerts.map((alert) => {
-      if (!alert.active) return alert;
-
-      const currentPrice = productMap.get(alert.productName);
-      if (currentPrice === undefined) return alert;
-
-      const hitBelow = alert.direction === "below" && currentPrice <= alert.targetPrice;
-      const hitAbove = alert.direction === "above" && currentPrice >= alert.targetPrice;
-
-      if (hitBelow || hitAbove) {
-        if (Notification.permission === "granted") {
-          new Notification("Goldpreis-Alarm", {
-            body: `${alert.productName}: ${currentPrice.toFixed(2)} €`,
-          });
-        }
-        return { ...alert, active: false };
-      }
-
-      return alert;
-    });
-
-    if (JSON.stringify(updatedAlerts) !== JSON.stringify(alerts)) {
-      persistAlerts(updatedAlerts);
-    }
-  }, [allRows, alerts]);
-
   const eur24Ref =
     refGeneral.find((row) => row.name === "Gold 1 g (24K Spotpreis)")?.priceValue ?? 0;
   const eur24Market =
@@ -380,23 +407,25 @@ export default function HomePageClient() {
   const try24Market =
     marketTurkey.find((row) => row.name === "Gram Altın (1 g)")?.priceTryValue ?? try24Ref;
 
-  const eurPerGram =
-    calculatorMode === "ref"
-      ? calculatorKarat === 24
-        ? eur24Ref
-        : eur24Ref * (22 / 24)
-      : calculatorKarat === 24
-      ? eur24Market
-      : eur24Market * (22 / 24);
+  function getKaratFactor(karat: GoldKarat) {
+    switch (karat) {
+      case 24:
+        return 1;
+      case 22:
+        return 22 / 24;
+      case 18:
+        return 18 / 24;
+      case 14:
+        return 14 / 24;
+      case 8:
+        return 8 / 24;
+    }
+  }
 
-  const tryPerGram =
-    calculatorMode === "ref"
-      ? calculatorKarat === 24
-        ? try24Ref
-        : try24Ref * (22 / 24)
-      : calculatorKarat === 24
-      ? try24Market
-      : try24Market * (22 / 24);
+  const karatFactor = getKaratFactor(calculatorKarat);
+
+  const eurPerGram = (calculatorMode === "ref" ? eur24Ref : eur24Market) * karatFactor;
+  const tryPerGram = (calculatorMode === "ref" ? try24Ref : try24Market) * karatFactor;
 
   const weightValue = Number(calculatorWeight.replace(",", "."));
   const calculatorResult =
@@ -406,8 +435,8 @@ export default function HomePageClient() {
         : tryPerGram * weightValue
       : null;
 
-  const calculatorBuy = calculatorResult !== null ? calculatorResult * 0.975 : null;
-  const calculatorSell = calculatorResult !== null ? calculatorResult * 1.0 : null;
+  const calculatorBuy = calculatorResult !== null ? calculatorResult * 0.97 : null;
+  const calculatorSell = calculatorResult !== null ? calculatorResult : null;
   const calculatorSpread =
     calculatorResult !== null && calculatorBuy !== null && calculatorSell !== null
       ? calculatorSell - calculatorBuy
@@ -449,18 +478,6 @@ export default function HomePageClient() {
           maximumFractionDigits: 2,
         }).format(calculatorSpread);
 
-  const emailDisplay = "a_nikbay [at] outlook [dot] com";
-  const realEmail = "a_nikbay@outlook.com";
-
-  async function copyEmail() {
-    try {
-      await navigator.clipboard.writeText(realEmail);
-      alert("E-Mail-Adresse wurde kopiert.");
-    } catch {
-      alert("Kopieren war nicht möglich.");
-    }
-  }
-
   function applyCalculatorPreset(label: string) {
     setCalculatorPreset(label);
 
@@ -478,10 +495,6 @@ export default function HomePageClient() {
     if (!alertProduct || Number.isNaN(priceValue) || priceValue <= 0) {
       alert("Bitte Produkt und gültigen Zielpreis eingeben.");
       return;
-    }
-
-    if ("Notification" in window && Notification.permission === "default") {
-      await Notification.requestPermission();
     }
 
     const next: AlertItem[] = [
@@ -506,7 +519,93 @@ export default function HomePageClient() {
   return (
     <main style={pageStyle}>
       <div style={containerStyle}>
-        <h1 style={titleStyle}>Goldpreise in Österreich</h1>
+        <div
+          style={{
+            position: "relative",
+            marginBottom: "12px",
+            minHeight: "74px",
+          }}
+        >
+          <h1
+            style={{
+              ...titleStyle,
+              marginBottom: 0,
+              textAlign: "center",
+            }}
+          >
+            Goldpreise in Österreich
+          </h1>
+
+          <div
+            style={{
+              position: "absolute",
+              top: "0",
+              right: "0",
+              display: "flex",
+              flexDirection: "column",
+              gap: 4,
+              alignItems: "center",
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                gap: 6,
+                flexWrap: "wrap",
+                justifyContent: "center",
+              }}
+            >
+              <button
+                onClick={() => setViewMode("auto")}
+                style={{
+                  padding: "5px 9px",
+                  fontSize: "13px",
+                  borderRadius: 8,
+                  border: "1px solid #444",
+                  background: viewMode === "auto" ? "#ffd700" : "#222",
+                  color: viewMode === "auto" ? "#000" : "#fff",
+                  cursor: "pointer",
+                }}
+              >
+                Auto
+              </button>
+
+              <button
+                onClick={() => setViewMode("desktop")}
+                style={{
+                  padding: "5px 9px",
+                  fontSize: "13px",
+                  borderRadius: 8,
+                  border: "1px solid #444",
+                  background: viewMode === "desktop" ? "#ffd700" : "#222",
+                  color: viewMode === "desktop" ? "#000" : "#fff",
+                  cursor: "pointer",
+                }}
+              >
+                Desktop
+              </button>
+
+              <button
+                onClick={() => setViewMode("mobile")}
+                style={{
+                  padding: "5px 9px",
+                  fontSize: "13px",
+                  borderRadius: 8,
+                  border: "1px solid #444",
+                  background: viewMode === "mobile" ? "#ffd700" : "#222",
+                  color: viewMode === "mobile" ? "#000" : "#fff",
+                  cursor: "pointer",
+                }}
+              >
+                Mobil
+              </button>
+            </div>
+
+            <div style={{ fontSize: 11, opacity: 0.72 }}>
+              Automatisch erkannt: {autoMobileDetected ? "Mobil" : "Desktop"}
+            </div>
+          </div>
+        </div>
 
         <p style={introStyle}>
           Aktuelle Referenzpreise und marktnahe Richtwerte für Gold in Österreich,
@@ -516,8 +615,6 @@ export default function HomePageClient() {
         <div style={trustBarStyle}>
           <span>✔ Keine Anlageberatung</span>
           <span>✔ Reine Richtwerte</span>
-          <span>✔ Keine Händlertexte kopiert</span>
-          <span>✔ Serverseitiges Preisarchiv</span>
         </div>
 
         <MainTabs
@@ -546,8 +643,7 @@ export default function HomePageClient() {
           <div style={topInfoCardStyle}>
             <strong>Änderung zum Vortag</strong>
             <p style={topInfoTextStyle}>
-              Die Prozentänderung vergleicht mit dem lokal gespeicherten Tagesstartwert dieses
-              Kalendertags auf deinem Gerät.
+              Die Preisänderung vergleicht mit dem serverseitig gespeicherten Tagesstartwert.
             </p>
           </div>
         </div>
@@ -570,11 +666,71 @@ export default function HomePageClient() {
           onlyFavorites={onlyFavorites}
           setOnlyFavorites={setOnlyFavorites}
           onRefresh={() => loadPrices(false)}
+          favoritesFirst={favoritesFirst}
+          setFavoritesFirst={setFavoritesFirst}
         />
+
+        <div
+          style={{
+            display: "flex",
+            gap: "10px",
+            flexWrap: "wrap",
+            justifyContent: "center",
+            marginTop: "-4px",
+            marginBottom: "18px",
+          }}
+        >
+          <a
+            href="#goldpreis-allgemein"
+            style={{
+              padding: "9px 14px",
+              borderRadius: "999px",
+              backgroundColor: "#e5e7eb",
+              color: "#111827",
+              textDecoration: "none",
+              fontWeight: 700,
+              fontSize: "14px",
+            }}
+          >
+            Goldpreis allgemein
+          </a>
+
+          <a
+            href="#goldpreis-oesterreich"
+            style={{
+              padding: "9px 14px",
+              borderRadius: "999px",
+              backgroundColor: "#e5e7eb",
+              color: "#111827",
+              textDecoration: "none",
+              fontWeight: 700,
+              fontSize: "14px",
+            }}
+          >
+            Österreichisches Gold
+          </a>
+
+          <a
+            href="#goldpreis-tuerkei"
+            style={{
+              padding: "9px 14px",
+              borderRadius: "999px",
+              backgroundColor: "#e5e7eb",
+              color: "#111827",
+              textDecoration: "none",
+              fontWeight: 700,
+              fontSize: "14px",
+            }}
+          >
+            Türkisches Gold
+          </a>
+        </div>
 
         <div style={statusRowStyle}>
           <span style={statusBadgeStyle}>
-            {backgroundUpdating ? "Aktualisierung läuft …" : "Automatische Aktualisierung alle 15 Sekunden"}
+            {backgroundUpdating
+              ? "Aktualisierung läuft …"
+              : "Automatische Aktualisierung alle 15 Sekunden"}
           </span>
           <span style={statusSubtleStyle}>{statusText}</span>
         </div>
@@ -599,15 +755,15 @@ export default function HomePageClient() {
               Preisangaben einzelner Händler-Websites direkt übernommen.
             </div>
 
-            {loading && (
-              <div style={loadingBoxStyle}>🔄 Aktuelle Preise werden geladen …</div>
-            )}
+            {loading && <div style={loadingBoxStyle}>🔄 Aktuelle Preise werden geladen …</div>}
 
             <PriceTableSection
               title="Goldpreis allgemein"
               rows={visibleRefGeneral}
               favorites={favorites}
               toggleFavorite={toggleFavorite}
+              viewMode={effectiveViewMode}
+              sectionId="goldpreis-allgemein"
             />
 
             <PriceTableSection
@@ -615,6 +771,8 @@ export default function HomePageClient() {
               rows={visibleRefAustria}
               favorites={favorites}
               toggleFavorite={toggleFavorite}
+              viewMode={effectiveViewMode}
+              sectionId="goldpreis-oesterreich"
             />
 
             <PriceTableSection
@@ -623,15 +781,15 @@ export default function HomePageClient() {
               favorites={favorites}
               toggleFavorite={toggleFavorite}
               isDual
+              viewMode={effectiveViewMode}
+              sectionId="goldpreis-tuerkei"
             />
           </>
         )}
 
         {activeTab === "market" && (
           <>
-            <p style={infoStyle}>
-              Marktnahe Richtwerte. Aktualisierung alle 15 Sekunden.
-            </p>
+            <p style={infoStyle}>Marktnahe Richtwerte. Aktualisierung alle 15 Sekunden.</p>
 
             <div style={noticeBoxStyle}>
               <strong>Hinweis:</strong> Alle Angaben auf dieser Website dienen ausschließlich
@@ -646,15 +804,15 @@ export default function HomePageClient() {
               tatsächlichen Händlerpreisen sind daher jederzeit möglich.
             </div>
 
-            {loading && (
-              <div style={loadingBoxStyle}>🔄 Aktuelle Preise werden geladen …</div>
-            )}
+            {loading && <div style={loadingBoxStyle}>🔄 Aktuelle Preise werden geladen …</div>}
 
             <PriceTableSection
               title="Marktpreis allgemein"
               rows={visibleMarketGeneral}
               favorites={favorites}
               toggleFavorite={toggleFavorite}
+              viewMode={effectiveViewMode}
+              sectionId="goldpreis-allgemein"
             />
 
             <PriceTableSection
@@ -662,6 +820,8 @@ export default function HomePageClient() {
               rows={visibleMarketAustria}
               favorites={favorites}
               toggleFavorite={toggleFavorite}
+              viewMode={effectiveViewMode}
+              sectionId="goldpreis-oesterreich"
             />
 
             <PriceTableSection
@@ -670,13 +830,13 @@ export default function HomePageClient() {
               favorites={favorites}
               toggleFavorite={toggleFavorite}
               isDual
+              viewMode={effectiveViewMode}
+              sectionId="goldpreis-tuerkei"
             />
           </>
         )}
 
         <CalculatorSection
-          calculatorPreset={calculatorPreset}
-          applyCalculatorPreset={applyCalculatorPreset}
           calculatorMode={calculatorMode}
           setCalculatorMode={setCalculatorMode}
           calculatorKarat={calculatorKarat}
@@ -685,22 +845,24 @@ export default function HomePageClient() {
           setCalculatorWeight={setCalculatorWeight}
           calculatorCurrency={calculatorCurrency}
           setCalculatorCurrency={setCalculatorCurrency}
-          calculatorFormatted={calculatorFormatted}
-          calculatorBuyFormatted={calculatorBuyFormatted}
-          calculatorSellFormatted={calculatorSellFormatted}
-          calculatorSpreadFormatted={calculatorSpreadFormatted}
+          calculatorPreset={calculatorPreset}
+          applyCalculatorPreset={applyCalculatorPreset}
+          eur24Ref={eur24Ref}
+          eur24Market={eur24Market}
+          try24Ref={try24Ref}
+          try24Market={try24Market}
         />
 
         <AlertsSection
+          alerts={alerts}
           allRows={allRows}
           alertProduct={alertProduct}
           setAlertProduct={setAlertProduct}
-          alertDirection={alertDirection}
-          setAlertDirection={setAlertDirection}
           alertTarget={alertTarget}
           setAlertTarget={setAlertTarget}
+          alertDirection={alertDirection}
+          setAlertDirection={setAlertDirection}
           createAlert={createAlert}
-          alerts={alerts}
           removeAlert={removeAlert}
         />
 
@@ -712,6 +874,9 @@ export default function HomePageClient() {
           setChartRange={setChartRange}
           historyLoading={historyLoading}
           historyData={historyData}
+          favoriteChartKeys={favoriteChartKeys}
+          showOnlyFavoriteCharts={showOnlyFavoriteCharts}
+          setShowOnlyFavoriteCharts={setShowOnlyFavoriteCharts}
         />
 
         <TrustInfoSection />
@@ -727,8 +892,8 @@ export default function HomePageClient() {
 
         <LegalSection
           legalTab={legalTab}
-          emailDisplay={emailDisplay}
-          copyEmail={copyEmail}
+          emailDisplay="a_nikbay [at] outlook [dot] com"
+          copyEmail={() => {}}
         />
       </div>
     </main>

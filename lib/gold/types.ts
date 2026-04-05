@@ -3,6 +3,8 @@ export type LegalTab = "none" | "impressum" | "disclaimer" | "calculation";
 export type SortKey = "default" | "name-asc" | "name-desc" | "price-asc" | "price-desc";
 export type ChartRange = "day" | "week" | "month";
 
+export type GoldKarat = 24 | 22 | 18 | 14 | 8;
+
 export type BaseRow = {
   id: string;
   name: string;
@@ -81,7 +83,7 @@ export type AlertItem = {
 export type CalculatorPreset = {
   label: string;
   mode: TabMode;
-  karat: 22 | 24;
+  karat: GoldKarat;
   weight: string;
   currency: "EUR" | "TRY";
 };

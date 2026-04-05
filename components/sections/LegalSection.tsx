@@ -1,6 +1,5 @@
 import {
   cardStyle,
-  copyButtonStyle,
   legalTextStyle,
   sectionTitleStyle,
 } from "@/lib/gold/styles";
@@ -9,7 +8,6 @@ import type { LegalTab } from "@/lib/gold/types";
 export default function LegalSection({
   legalTab,
   emailDisplay,
-  copyEmail,
 }: {
   legalTab: LegalTab;
   emailDisplay: string;
@@ -37,13 +35,7 @@ export default function LegalSection({
             Österreich
           </p>
 
-          <p>
-            E-Mail: {emailDisplay}
-            <br />
-            <button type="button" onClick={copyEmail} style={copyButtonStyle}>
-              E-Mail kopieren
-            </button>
-          </p>
+          <p>E-Mail: {emailDisplay}</p>
 
           <p>
             <strong>Haftungsausschluss:</strong>

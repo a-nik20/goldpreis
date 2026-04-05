@@ -1,4 +1,3 @@
-import EmptyState from "@/components/ui/EmptyState";
 import {
   alertCardStyle,
   alertListStyle,
@@ -12,29 +11,29 @@ import {
   selectStyle,
   utilityButtonStyle,
 } from "@/lib/gold/styles";
-import type { AlertItem, DualRow, SingleRow } from "@/lib/gold/types";
+import type { AlertItem } from "@/lib/gold/types";
 
 export default function AlertsSection({
+  alerts,
   allRows,
   alertProduct,
   setAlertProduct,
-  alertDirection,
-  setAlertDirection,
   alertTarget,
   setAlertTarget,
+  alertDirection,
+  setAlertDirection,
   createAlert,
-  alerts,
   removeAlert,
 }: {
-  allRows: Array<SingleRow | DualRow>;
-  alertProduct: string;
-  setAlertProduct: (value: string) => void;
-  alertDirection: "below" | "above";
-  setAlertDirection: (value: "below" | "above") => void;
-  alertTarget: string;
-  setAlertTarget: (value: string) => void;
-  createAlert: () => void;
   alerts: AlertItem[];
+  allRows: any[];
+  alertProduct: string;
+  setAlertProduct: (v: string) => void;
+  alertTarget: string;
+  setAlertTarget: (v: string) => void;
+  alertDirection: "below" | "above";
+  setAlertDirection: (v: "below" | "above") => void;
+  createAlert: () => void;
   removeAlert: (id: string) => void;
 }) {
   return (
@@ -62,7 +61,9 @@ export default function AlertsSection({
           Richtung
           <select
             value={alertDirection}
-            onChange={(event) => setAlertDirection(event.target.value as "below" | "above")}
+            onChange={(event) =>
+              setAlertDirection(event.target.value as "below" | "above")
+            }
             style={selectStyle}
           >
             <option value="below">unter Preis</option>
@@ -89,21 +90,28 @@ export default function AlertsSection({
       </div>
 
       {alerts.length === 0 ? (
-        <EmptyState text="Noch keine Preis-Alarme gespeichert." />
+        <div style={{ padding: "12px", color: "#6b7280" }}>
+          Noch keine Preis-Alarme gespeichert.
+        </div>
       ) : (
         <div style={alertListStyle}>
           {alerts.map((alert) => (
             <div key={alert.id} style={alertCardStyle}>
               <div>
                 <strong>{alert.productName}</strong>
+
                 <div style={alertSubTextStyle}>
-                  {alert.direction === "below" ? "Alarm bei unter" : "Alarm bei über"}{" "}
+                  {alert.direction === "below"
+                    ? "Alarm bei unter"
+                    : "Alarm bei über"}{" "}
                   {alert.targetPrice.toFixed(2)} €
                 </div>
+
                 <div style={alertSubTextStyle}>
                   Status: {alert.active ? "aktiv" : "ausgelöst"}
                 </div>
               </div>
+
               <button
                 type="button"
                 onClick={() => removeAlert(alert.id)}

@@ -10,6 +10,8 @@ import {
   rangeButtonWrapStyle,
   sectionTitleStyle,
   selectStyle,
+  utilityButtonActiveStyle,
+  utilityButtonStyle,
 } from "@/lib/gold/styles";
 import type { ChartRange, HistoryResponse } from "@/lib/gold/types";
 
@@ -21,6 +23,9 @@ export default function HistorySection({
   setChartRange,
   historyLoading,
   historyData,
+  favoriteChartKeys,
+  showOnlyFavoriteCharts,
+  setShowOnlyFavoriteCharts,
 }: {
   selectedChartKey: string;
   setSelectedChartKey: (value: string) => void;
@@ -29,7 +34,14 @@ export default function HistorySection({
   setChartRange: (value: ChartRange) => void;
   historyLoading: boolean;
   historyData: HistoryResponse | null;
+  favoriteChartKeys: string[];
+  showOnlyFavoriteCharts: boolean;
+  setShowOnlyFavoriteCharts: React.Dispatch<React.SetStateAction<boolean>>;
 }) {
+  const visibleChartOptions = showOnlyFavoriteCharts
+    ? chartOptions.filter((option) => favoriteChartKeys.includes(option.key))
+    : chartOptions;
+
   return (
     <section style={cardStyle}>
       <h2 style={sectionTitleStyle}>Historischer Verlauf</h2>
@@ -42,7 +54,7 @@ export default function HistorySection({
             onChange={(event) => setSelectedChartKey(event.target.value)}
             style={selectStyle}
           >
-            {chartOptions.map((option) => (
+            {visibleChartOptions.map((option) => (
               <option key={option.key} value={option.key}>
                 {option.label}
               </option>
@@ -50,13 +62,26 @@ export default function HistorySection({
           </select>
         </label>
 
+        <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", alignItems: "flex-end" }}>
+          <button
+            type="button"
+            onClick={() => setShowOnlyFavoriteCharts((prev) => !prev)}
+            style={{
+              ...utilityButtonStyle,
+              ...(showOnlyFavoriteCharts ? utilityButtonActiveStyle : {}),
+            }}
+          >
+            {showOnlyFavoriteCharts ? "Nur Favoriten im Chart: AN" : "Nur Favoriten im Chart"}
+          </button>
+        </div>
+
         <div style={rangeButtonWrapStyle}>
           <button
             type="button"
             onClick={() => setChartRange("day")}
             style={{ ...rangeButtonStyle, ...(chartRange === "day" ? rangeButtonActiveStyle : {}) }}
           >
-            Tagesansicht
+            24 Stunden
           </button>
 
           <button
@@ -78,12 +103,14 @@ export default function HistorySection({
               ...(chartRange === "month" ? rangeButtonActiveStyle : {}),
             }}
           >
-            Monat
+            30 Tage
           </button>
         </div>
       </div>
 
-      {historyLoading ? (
+      {visibleChartOptions.length === 0 ? (
+        <EmptyState text="Keine passenden Chart-Produkte verfügbar." />
+      ) : historyLoading ? (
         <div style={loadingBoxStyle}>🔄 Verlauf wird geladen …</div>
       ) : historyData ? (
         <HistoryChart

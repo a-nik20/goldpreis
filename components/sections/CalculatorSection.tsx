@@ -9,11 +9,9 @@ import {
   sectionTitleStyle,
   selectStyle,
 } from "@/lib/gold/styles";
-import type { TabMode } from "@/lib/gold/types";
+import type { GoldKarat, TabMode } from "@/lib/gold/types";
 
 export default function CalculatorSection({
-  calculatorPreset,
-  applyCalculatorPreset,
   calculatorMode,
   setCalculatorMode,
   calculatorKarat,
@@ -22,26 +20,93 @@ export default function CalculatorSection({
   setCalculatorWeight,
   calculatorCurrency,
   setCalculatorCurrency,
-  calculatorFormatted,
-  calculatorBuyFormatted,
-  calculatorSellFormatted,
-  calculatorSpreadFormatted,
+  calculatorPreset,
+  applyCalculatorPreset,
+  eur24Ref,
+  eur24Market,
+  try24Ref,
+  try24Market,
 }: {
-  calculatorPreset: string;
-  applyCalculatorPreset: (label: string) => void;
   calculatorMode: TabMode;
-  setCalculatorMode: (value: TabMode) => void;
-  calculatorKarat: 22 | 24;
-  setCalculatorKarat: (value: 22 | 24) => void;
+  setCalculatorMode: (v: TabMode) => void;
+  calculatorKarat: GoldKarat;
+  setCalculatorKarat: (v: GoldKarat) => void;
   calculatorWeight: string;
-  setCalculatorWeight: (value: string) => void;
+  setCalculatorWeight: (v: string) => void;
   calculatorCurrency: "EUR" | "TRY";
-  setCalculatorCurrency: (value: "EUR" | "TRY") => void;
-  calculatorFormatted: string | null;
-  calculatorBuyFormatted: string | null;
-  calculatorSellFormatted: string | null;
-  calculatorSpreadFormatted: string | null;
+  setCalculatorCurrency: (v: "EUR" | "TRY") => void;
+  calculatorPreset: string;
+  applyCalculatorPreset: (v: string) => void;
+  eur24Ref: number;
+  eur24Market: number;
+  try24Ref: number;
+  try24Market: number;
 }) {
+  function getKaratFactor(karat: GoldKarat) {
+    switch (karat) {
+      case 24:
+        return 1;
+      case 22:
+        return 22 / 24;
+      case 18:
+        return 18 / 24;
+      case 14:
+        return 14 / 24;
+      case 8:
+        return 8 / 24;
+    }
+  }
+
+  function getKaratLabel(karat: GoldKarat) {
+    switch (karat) {
+      case 24:
+        return "24K (999)";
+      case 22:
+        return "22K (916)";
+      case 18:
+        return "18K (750)";
+      case 14:
+        return "14K (585)";
+      case 8:
+        return "8K (333)";
+    }
+  }
+
+  const factor = getKaratFactor(calculatorKarat);
+
+  const eurPerGram =
+    (calculatorMode === "ref" ? eur24Ref : eur24Market) * factor;
+
+  const tryPerGram =
+    (calculatorMode === "ref" ? try24Ref : try24Market) * factor;
+
+  const weight = Number(calculatorWeight.replace(",", "."));
+
+  const result =
+    !Number.isNaN(weight) && weight > 0
+      ? calculatorCurrency === "EUR"
+        ? eurPerGram * weight
+        : tryPerGram * weight
+      : null;
+
+  const buy = result !== null ? result * 0.97 : null;
+  const sell = result;
+  const diff = sell !== null && buy !== null ? sell - buy : null;
+
+  function format(value: number | null) {
+    if (value === null) return null;
+
+    return new Intl.NumberFormat("de-AT", {
+      style: "currency",
+      currency: calculatorCurrency,
+      maximumFractionDigits: 2,
+    }).format(value);
+  }
+
+  const formattedSell = format(sell);
+  const formattedBuy = format(buy);
+  const formattedDiff = format(diff);
+
   return (
     <section style={cardStyle}>
       <h2 style={sectionTitleStyle}>Preisrechner</h2>
@@ -78,11 +143,16 @@ export default function CalculatorSection({
           Karat
           <select
             value={calculatorKarat}
-            onChange={(event) => setCalculatorKarat(Number(event.target.value) as 22 | 24)}
+            onChange={(event) =>
+              setCalculatorKarat(Number(event.target.value) as GoldKarat)
+            }
             style={selectStyle}
           >
-            <option value={24}>24K</option>
-            <option value={22}>22K</option>
+            <option value={24}>{getKaratLabel(24)}</option>
+            <option value={22}>{getKaratLabel(22)}</option>
+            <option value={18}>{getKaratLabel(18)}</option>
+            <option value={14}>{getKaratLabel(14)}</option>
+            <option value={8}>{getKaratLabel(8)}</option>
           </select>
         </label>
 
@@ -100,7 +170,9 @@ export default function CalculatorSection({
           Währung
           <select
             value={calculatorCurrency}
-            onChange={(event) => setCalculatorCurrency(event.target.value as "EUR" | "TRY")}
+            onChange={(event) =>
+              setCalculatorCurrency(event.target.value as "EUR" | "TRY")
+            }
             style={selectStyle}
           >
             <option value="EUR">Euro</option>
@@ -110,27 +182,24 @@ export default function CalculatorSection({
       </div>
 
       <div style={calculatorHintStyle}>
-        Mit einer Produktvorlage werden Gewicht, Karat, Modus und Währung automatisch vorbelegt.
+        Karat wird automatisch in Feingold umgerechnet (z. B. 18K = 75 % Goldanteil).
       </div>
 
       <div style={calculatorResultStyle}>
-        {calculatorFormatted ? (
+        {sell !== null ? (
           <>
             <div>
-              Geschätzter Wert: <strong>{calculatorFormatted}</strong>
+              Geschätzter Verkaufswert: <strong>{formattedSell}</strong>
             </div>
             <div>
-              Modellierter Ankauf: <strong>{calculatorBuyFormatted}</strong>
+              Ankauf (realistisch): <strong>{formattedBuy}</strong>
             </div>
             <div>
-              Modellierter Verkauf: <strong>{calculatorSellFormatted}</strong>
-            </div>
-            <div>
-              Spread: <strong>{calculatorSpreadFormatted}</strong>
+              Differenz: <strong>{formattedDiff}</strong>
             </div>
           </>
         ) : (
-          <>Bitte ein gültiges Gewicht eingeben.</>
+          <>Bitte gültiges Gewicht eingeben.</>
         )}
       </div>
     </section>
