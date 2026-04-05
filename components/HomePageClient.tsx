@@ -442,42 +442,6 @@ export default function HomePageClient() {
       ? calculatorSell - calculatorBuy
       : null;
 
-  const calculatorFormatted =
-    calculatorResult === null
-      ? null
-      : new Intl.NumberFormat("de-AT", {
-          style: "currency",
-          currency: calculatorCurrency,
-          maximumFractionDigits: 2,
-        }).format(calculatorResult);
-
-  const calculatorBuyFormatted =
-    calculatorBuy === null
-      ? null
-      : new Intl.NumberFormat("de-AT", {
-          style: "currency",
-          currency: calculatorCurrency,
-          maximumFractionDigits: 2,
-        }).format(calculatorBuy);
-
-  const calculatorSellFormatted =
-    calculatorSell === null
-      ? null
-      : new Intl.NumberFormat("de-AT", {
-          style: "currency",
-          currency: calculatorCurrency,
-          maximumFractionDigits: 2,
-        }).format(calculatorSell);
-
-  const calculatorSpreadFormatted =
-    calculatorSpread === null
-      ? null
-      : new Intl.NumberFormat("de-AT", {
-          style: "currency",
-          currency: calculatorCurrency,
-          maximumFractionDigits: 2,
-        }).format(calculatorSpread);
-
   function applyCalculatorPreset(label: string) {
     setCalculatorPreset(label);
 
@@ -519,93 +483,15 @@ export default function HomePageClient() {
   return (
     <main style={pageStyle}>
       <div style={containerStyle}>
-        <div
+        <h1
           style={{
-            position: "relative",
-            marginBottom: "12px",
-            minHeight: "74px",
+            ...titleStyle,
+            marginBottom: 0,
+            textAlign: "center",
           }}
         >
-          <h1
-            style={{
-              ...titleStyle,
-              marginBottom: 0,
-              textAlign: "center",
-            }}
-          >
-            Goldpreise in Österreich
-          </h1>
-
-          <div
-            style={{
-              position: "absolute",
-              top: "0",
-              right: "0",
-              display: "flex",
-              flexDirection: "column",
-              gap: 4,
-              alignItems: "center",
-            }}
-          >
-            <div
-              style={{
-                display: "flex",
-                gap: 6,
-                flexWrap: "wrap",
-                justifyContent: "center",
-              }}
-            >
-              <button
-                onClick={() => setViewMode("auto")}
-                style={{
-                  padding: "5px 9px",
-                  fontSize: "13px",
-                  borderRadius: 8,
-                  border: "1px solid #444",
-                  background: viewMode === "auto" ? "#ffd700" : "#222",
-                  color: viewMode === "auto" ? "#000" : "#fff",
-                  cursor: "pointer",
-                }}
-              >
-                Auto
-              </button>
-
-              <button
-                onClick={() => setViewMode("desktop")}
-                style={{
-                  padding: "5px 9px",
-                  fontSize: "13px",
-                  borderRadius: 8,
-                  border: "1px solid #444",
-                  background: viewMode === "desktop" ? "#ffd700" : "#222",
-                  color: viewMode === "desktop" ? "#000" : "#fff",
-                  cursor: "pointer",
-                }}
-              >
-                Desktop
-              </button>
-
-              <button
-                onClick={() => setViewMode("mobile")}
-                style={{
-                  padding: "5px 9px",
-                  fontSize: "13px",
-                  borderRadius: 8,
-                  border: "1px solid #444",
-                  background: viewMode === "mobile" ? "#ffd700" : "#222",
-                  color: viewMode === "mobile" ? "#000" : "#fff",
-                  cursor: "pointer",
-                }}
-              >
-                Mobil
-              </button>
-            </div>
-
-            <div style={{ fontSize: 11, opacity: 0.72 }}>
-              Automatisch erkannt: {autoMobileDetected ? "Mobil" : "Desktop"}
-            </div>
-          </div>
-        </div>
+          Goldpreise in Österreich
+        </h1>
 
         <p style={introStyle}>
           Aktuelle Referenzpreise und marktnahe Richtwerte für Gold in Österreich,
@@ -895,6 +781,71 @@ export default function HomePageClient() {
           emailDisplay="a_nikbay [at] outlook [dot] com"
           copyEmail={() => {}}
         />
+
+        <div
+          style={{
+            marginTop: 30,
+            display: "flex",
+            justifyContent: "center",
+            alignItems: "center",
+            gap: 12,
+            flexWrap: "wrap",
+            padding: "12px 0",
+            borderTop: "1px solid #d1d5db",
+            opacity: 0.85,
+          }}
+        >
+          <span style={{ fontSize: 12 }}>Ansicht:</span>
+
+          <button
+            onClick={() => setViewMode("auto")}
+            style={{
+              padding: "4px 10px",
+              borderRadius: 6,
+              border: "1px solid #444",
+              background: viewMode === "auto" ? "#ffd700" : "#222",
+              color: viewMode === "auto" ? "#000" : "#fff",
+              fontSize: 12,
+              cursor: "pointer",
+            }}
+          >
+            Auto
+          </button>
+
+          <button
+            onClick={() => setViewMode("desktop")}
+            style={{
+              padding: "4px 10px",
+              borderRadius: 6,
+              border: "1px solid #444",
+              background: viewMode === "desktop" ? "#ffd700" : "#222",
+              color: viewMode === "desktop" ? "#000" : "#fff",
+              fontSize: 12,
+              cursor: "pointer",
+            }}
+          >
+            Desktop
+          </button>
+
+          <button
+            onClick={() => setViewMode("mobile")}
+            style={{
+              padding: "4px 10px",
+              borderRadius: 6,
+              border: "1px solid #444",
+              background: viewMode === "mobile" ? "#ffd700" : "#222",
+              color: viewMode === "mobile" ? "#000" : "#fff",
+              fontSize: 12,
+              cursor: "pointer",
+            }}
+          >
+            Mobil
+          </button>
+
+          <span style={{ fontSize: 12, opacity: 0.7 }}>
+            Automatisch erkannt: {autoMobileDetected ? "Mobil" : "Desktop"}
+          </span>
+        </div>
       </div>
     </main>
   );
